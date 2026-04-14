@@ -20,6 +20,49 @@ from firewall_tool.runner import (
 
 
 @mock.patch("firewall_tool.commands.ipset_direct.run_firewall_cmd")
+def test_direct_add_drop_refuses_without_accept_risk(mock_run: mock.MagicMock) -> None:
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        [
+            "direct",
+            "add",
+            "--chain",
+            "INPUT",
+            "--priority",
+            "999",
+            "--rule",
+            "-j DROP",
+            "--yes",
+        ],
+    )
+    assert r.exit_code == 2
+    mock_run.assert_not_called()
+
+
+@mock.patch("firewall_tool.commands.ipset_direct.run_firewall_cmd")
+def test_direct_remove_ssh_refuses_without_accept(mock_run: mock.MagicMock) -> None:
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        [
+            "direct",
+            "remove",
+            "--chain",
+            "INPUT",
+            "--priority",
+            "512",
+            "--rule",
+            "-p tcp --dport 22 -j ACCEPT",
+            "--yes",
+            "--no-verify-present",
+        ],
+    )
+    assert r.exit_code == 2
+    mock_run.assert_not_called()
+
+
+@mock.patch("firewall_tool.commands.ipset_direct.run_firewall_cmd")
 def test_direct_rules_argv(mock_run: mock.MagicMock) -> None:
     mock_run.return_value = RunResult(stdout="OK\n", stderr="", code=0, argv=[])
     runner = CliRunner()

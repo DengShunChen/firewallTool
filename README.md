@@ -2,6 +2,8 @@
 
 以 `firewall-cmd`（線上）／`firewall-offline-cmd`（`--offline`）包一層的 firewalld 查詢／管理 CLI。
 
+**完整教學（firewalld 邏輯、sudo／PATH、direct 防呆步驟、offline、疑難排解）請見：[docs/使用教學.md](docs/使用教學.md)。**
+
 ## 開發環境（uv）
 
 在此環境使用 **uv** 前，請先載入代理設定：
@@ -60,19 +62,12 @@ sudo /path/to/firewallTool/.venv/bin/fwctl status
 | Rich rules | `fwctl rule list` · `fwctl rule add --rule 'rule family=...'` |
 | ipset 列表／詳情 | `fwctl ipset list` · `fwctl ipset show MYSET`（可加 `--permanent`） |
 | direct 規則 | `fwctl direct rules` · 另可 `direct chains`、`direct passthroughs` |
+| direct 新增／刪除 | 見下方「direct 防呆」；務必先 `--dry-run` |
 | 重載 runtime | `fwctl reload --yes` |
 | 緊急 panic | `fwctl panic on` · `fwctl panic off` |
 
 `--permanent`（**僅線上模式**）只影響「寫入永久設定檔」與 `list` 的資料來源；若要讓 runtime 與永久設定一致，變更後需執行 `fwctl reload`（或 `firewall-cmd --reload`）。
 
-### `--offline`（`firewall-offline-cmd`）
+### 進階：`--offline`、`direct add/remove`
 
-當 **`firewalld` 未執行**或要在 **chroot／映像建置** 等情境直接改磁碟上的設定時，在**最前面**加上 `--offline`（必須寫在子命令之前）：
-
-```bash
-fwctl --offline status
-fwctl --offline zone show public
-fwctl --offline service add http --zone public --yes   # 仍可加 --permanent，會自動略過
-```
-
-離線模式下：**沒有 runtime／D-Bus**，`status` 不會顯示 daemon `--state` 與 runtime 的 active zones；`reload` 與 `panic` 會拒絕執行（僅線上有效）。`run_firewall_cmd` 會自動從參數列**移除 `--permanent`**，以符合多數版本 `firewall-offline-cmd` 的參數行為。
+離線模式、`direct` 防呆與「如何從 `direct rules` 剪下正確的 `--rule`」等，請改讀教學文件 **[docs/使用教學.md](docs/使用教學.md)** 第 7～9 節，避免與 README 重複維護兩份內容。

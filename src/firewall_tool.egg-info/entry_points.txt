@@ -1,0 +1,2 @@
+[console_scripts]
+fwctl = firewall_tool.main:app

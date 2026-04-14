@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# 專案內建 uv 入口：先載入 ~/.proxy（若存在）再執行 uv，避免未設代理時無法解析套件。
+set -euo pipefail
+if [[ -f "${HOME}/.proxy" ]]; then
+  # shellcheck source=/dev/null
+  source "${HOME}/.proxy"
+fi
+exec uv "$@"

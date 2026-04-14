@@ -17,8 +17,8 @@ from firewall_tool.runner import (
 
 console = Console()
 
-service_app = typer.Typer(help="Inspect or change allowed services.")
-port_app = typer.Typer(help="Inspect or change allowed ports.")
+service_app = typer.Typer(help="檢視或變更允許的服務（service）。")
+port_app = typer.Typer(help="檢視或變更允許的埠（port）。")
 
 
 def _zone_args(zone: Optional[str]) -> List[str]:
@@ -37,12 +37,12 @@ def _confirm_mut(*, dry_run: bool, yes: bool, msg: str) -> None:
 
 @service_app.command("list")
 def service_list(
-    zone: Optional[str] = typer.Option(None, "--zone", "-z", help="Zone name."),
+    zone: Optional[str] = typer.Option(None, "--zone", "-z", help="Zone 名稱。"),
     permanent: bool = typer.Option(
         False,
         "--permanent",
         "-p",
-        help="Show permanent configuration instead of runtime.",
+        help="顯示 permanent 設定，而非目前 runtime。",
     ),
 ) -> None:
     args: List[str] = ["--list-services", *_perm(permanent), *_zone_args(zone)]
@@ -52,22 +52,24 @@ def service_list(
         print_firewall_cmd_error(console, e)
         raise typer.Exit(e.code) from e
     lines = [x for x in out.split() if x.strip()]
-    print_lines_table(console, "Services", lines, column_name="service")
+    title = "服務（permanent）" if permanent else "服務（runtime）"
+    print_lines_table(console, title, lines, column_name="service")
 
 
 @service_app.command("add")
 def service_add(
-    name: str = typer.Argument(..., help="Service name, e.g. ssh."),
+    name: str = typer.Argument(..., help="服務名稱，例如 ssh。"),
     zone: Optional[str] = typer.Option(None, "--zone", "-z"),
     permanent: bool = typer.Option(False, "--permanent", "-p"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print firewall-cmd only."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="只顯示將執行的 firewall-cmd 參數。"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="略過確認。"),
 ) -> None:
+    scope = "permanent" if permanent else "runtime"
+    z = zone or "（預設 zone）"
     _confirm_mut(
         dry_run=dry_run,
         yes=yes,
-        msg=f"Add service [bold]{name}[/bold] to zone {zone or '(default)'} "
-        f"({'permanent' if permanent else 'runtime'})?",
+        msg=f"要在 zone [bold]{z}[/bold] 新增服務 [bold]{name}[/bold]（[bold]{scope}[/bold]）？",
     )
     if not dry_run:
         require_root("add services")
@@ -83,29 +85,30 @@ def service_add(
         raise typer.Exit(e.code) from e
     if dry_run:
         console.print("[yellow]dry-run:[/yellow]", " ".join(res.argv))
-        if not is_offline():
+        if not is_offline() and permanent:
             console.print(
-                "[dim]If --permanent, run `firewall-cmd --reload` to apply to runtime.[/dim]"
+                "[dim]若使用 --permanent，之後請 [bold]fwctl reload[/bold] 讓 runtime 套用。[/dim]"
             )
         return
     console.print("[green]OK[/green]", res.stdout.strip())
     if permanent and not is_offline():
-        console.print("[dim]Remember: `fwctl reload` or firewall-cmd --reload[/dim]")
+        console.print("[dim]若要讓 runtime 與 permanent 一致，請執行：[/dim] [bold]fwctl reload[/bold]")
 
 
 @service_app.command("remove")
 def service_remove(
-    name: str = typer.Argument(..., help="Service name."),
+    name: str = typer.Argument(..., help="服務名稱。"),
     zone: Optional[str] = typer.Option(None, "--zone", "-z"),
     permanent: bool = typer.Option(False, "--permanent", "-p"),
     dry_run: bool = typer.Option(False, "--dry-run"),
     yes: bool = typer.Option(False, "--yes", "-y"),
 ) -> None:
+    scope = "permanent" if permanent else "runtime"
+    z = zone or "（預設 zone）"
     _confirm_mut(
         dry_run=dry_run,
         yes=yes,
-        msg=f"Remove service [bold]{name}[/bold] from zone {zone or '(default)'} "
-        f"({'permanent' if permanent else 'runtime'})?",
+        msg=f"要從 zone [bold]{z}[/bold] 移除服務 [bold]{name}[/bold]（[bold]{scope}[/bold]）？",
     )
     if not dry_run:
         require_root("remove services")
@@ -123,6 +126,8 @@ def service_remove(
         console.print("[yellow]dry-run:[/yellow]", " ".join(res.argv))
         return
     console.print("[green]OK[/green]", res.stdout.strip())
+    if permanent and not is_offline():
+        console.print("[dim]若要讓 runtime 與 permanent 一致，請執行：[/dim] [bold]fwctl reload[/bold]")
 
 
 @port_app.command("list")
@@ -137,24 +142,26 @@ def port_list(
         print_firewall_cmd_error(console, e)
         raise typer.Exit(e.code) from e
     parts = [p.strip() for p in out.split() if p.strip()]
-    print_lines_table(console, "Ports", parts, column_name="port")
+    title = "埠（permanent）" if permanent else "埠（runtime）"
+    print_lines_table(console, title, parts, column_name="port")
 
 
 @port_app.command("add")
 def port_add(
     spec: str = typer.Argument(
         ...,
-        help="Port spec, e.g. 443/tcp or 1000-2000/udp.",
+        help="埠規格，例如 443/tcp 或 1000-2000/udp。",
     ),
     zone: Optional[str] = typer.Option(None, "--zone", "-z"),
     permanent: bool = typer.Option(False, "--permanent", "-p"),
     dry_run: bool = typer.Option(False, "--dry-run"),
     yes: bool = typer.Option(False, "--yes", "-y"),
 ) -> None:
+    scope = "permanent" if permanent else "runtime"
     _confirm_mut(
         dry_run=dry_run,
         yes=yes,
-        msg=f"Add port [bold]{spec}[/bold] ({'permanent' if permanent else 'runtime'})?",
+        msg=f"要新增埠 [bold]{spec}[/bold]（[bold]{scope}[/bold]）？",
     )
     if not dry_run:
         require_root("add ports")
@@ -173,21 +180,22 @@ def port_add(
         return
     console.print("[green]OK[/green]", res.stdout.strip())
     if permanent and not is_offline():
-        console.print("[dim]Remember: reload if you expect runtime to match permanent.[/dim]")
+        console.print("[dim]若要讓 runtime 與 permanent 一致，請執行：[/dim] [bold]fwctl reload[/bold]")
 
 
 @port_app.command("remove")
 def port_remove(
-    spec: str = typer.Argument(..., help="Port spec, e.g. 443/tcp."),
+    spec: str = typer.Argument(..., help="埠規格，例如 443/tcp。"),
     zone: Optional[str] = typer.Option(None, "--zone", "-z"),
     permanent: bool = typer.Option(False, "--permanent", "-p"),
     dry_run: bool = typer.Option(False, "--dry-run"),
     yes: bool = typer.Option(False, "--yes", "-y"),
 ) -> None:
+    scope = "permanent" if permanent else "runtime"
     _confirm_mut(
         dry_run=dry_run,
         yes=yes,
-        msg=f"Remove port [bold]{spec}[/bold] ({'permanent' if permanent else 'runtime'})?",
+        msg=f"要移除埠 [bold]{spec}[/bold]（[bold]{scope}[/bold]）？",
     )
     if not dry_run:
         require_root("remove ports")
@@ -205,3 +213,5 @@ def port_remove(
         console.print("[yellow]dry-run:[/yellow]", " ".join(res.argv))
         return
     console.print("[green]OK[/green]", res.stdout.strip())
+    if permanent and not is_offline():
+        console.print("[dim]若要讓 runtime 與 permanent 一致，請執行：[/dim] [bold]fwctl reload[/bold]")

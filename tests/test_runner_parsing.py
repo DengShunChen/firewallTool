@@ -9,7 +9,10 @@ import pytest
 
 from typer.testing import CliRunner
 
-from firewall_tool.commands.ipset_direct import _parse_direct_rules_line
+from firewall_tool.commands.ipset_direct import (
+    _parse_direct_rules_line,
+    _parse_ipset_entries_stdout,
+)
 from firewall_tool.formatters import parse_active_zones, polkit_hint
 from firewall_tool.main import app
 from firewall_tool.runner import (
@@ -231,6 +234,53 @@ def test_ipset_wizard_remove_pick_entry_by_index(mock_run: mock.MagicMock) -> No
     assert len(remove_calls) == 1
     assert "--remove-entry=10.0.0.1" in remove_calls[0].args[0]
     assert remove_calls[0].kwargs.get("dry_run") is True
+
+
+def test_parse_ipset_entries_stdout_multiline() -> None:
+    raw = "10.0.0.1\n10.0.0.2\n"
+    assert _parse_ipset_entries_stdout(raw) == ["10.0.0.1", "10.0.0.2"]
+
+
+def test_parse_ipset_entries_stdout_single_line_spaced() -> None:
+    raw = "172.16.1.1 172.16.1.2 10.0.0.0/24\n"
+    assert _parse_ipset_entries_stdout(raw) == ["172.16.1.1", "172.16.1.2", "10.0.0.0/24"]
+
+
+def test_parse_ipset_entries_stdout_non_ip_single_line_unchanged() -> None:
+    raw = "foo bar\n"
+    assert _parse_ipset_entries_stdout(raw) == ["foo bar"]
+
+
+@mock.patch("firewall_tool.commands.ipset_direct.run_firewall_cmd")
+def test_ipset_delete_refuses_without_typed_token(mock_run: mock.MagicMock) -> None:
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        ["ipset", "delete", "MYSET", "--yes"],
+    )
+    assert r.exit_code == 2
+    mock_run.assert_not_called()
+
+
+@mock.patch("firewall_tool.commands.ipset_direct.run_firewall_cmd")
+def test_ipset_delete_dry_run_without_typed_token(mock_run: mock.MagicMock) -> None:
+    mock_run.side_effect = [
+        RunResult("", "", 0, []),
+        RunResult("", "", 0, ["/sbin/firewall-cmd", "--permanent", "--delete-ipset=MYSET"]),
+    ]
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        ["ipset", "delete", "MYSET", "--dry-run", "--yes"],
+    )
+    assert r.exit_code == 0, r.stdout
+    del_calls = [
+        c
+        for c in mock_run.call_args_list
+        if c.args and "--delete-ipset=MYSET" in c.args[0]
+    ]
+    assert len(del_calls) == 1
+    assert del_calls[0].kwargs.get("dry_run") is True
 
 
 def test_parse_direct_rules_line() -> None:

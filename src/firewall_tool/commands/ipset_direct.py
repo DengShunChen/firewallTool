@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import re
 import shlex
 from pathlib import Path
@@ -15,8 +16,8 @@ from firewall_tool.formatters import print_firewall_cmd_error, print_lines_table
 from firewall_tool.runner import FirewallCmdError, require_root, run_firewall_cmd
 
 console = Console()
-ipset_app = typer.Typer(help="List, inspect, or change firewalld ipsets.")
-direct_app = typer.Typer(help="Inspect or change firewalld --direct rules (guarded).")
+ipset_app = typer.Typer(help="列出、檢視或變更 firewalld ipset。")
+direct_app = typer.Typer(help="檢視或變更 firewalld --direct 規則（含防呆）。")
 
 _COMMON_CHAINS = frozenset({"INPUT", "OUTPUT", "FORWARD"})
 
@@ -47,12 +48,41 @@ def _get_ipset_entries_lines(name: str, *, permanent: bool) -> str:
     return res.stdout
 
 
+def _looks_like_ipset_address_token(tok: str) -> bool:
+    """保守判斷是否像 hash:net / hash:ip 的單一條目（避免把任意字串當成多筆）。"""
+    t = tok.strip()
+    if not t or len(t) > 128:
+        return False
+    try:
+        if "/" in t:
+            ipaddress.ip_network(t, strict=False)
+        else:
+            ipaddress.ip_address(t)
+        return True
+    except ValueError:
+        return False
+
+
 def _parse_ipset_entries_stdout(stdout: str) -> List[str]:
-    """Split `firewall-cmd --get-entries` stdout into non-empty lines (one entry per line 為常見格式)。"""
+    """
+    解析 `firewall-cmd --get-entries` 輸出：常見為一行一條目；若僅單行且以空白分隔多個
+    IP／CIDR，則拆成多筆（供精靈選號）。其它型別若無法全部辨識為位址，維持整行一筆。
+    """
     text = stdout.strip()
     if not text:
         return []
-    return [ln.strip() for ln in text.splitlines() if ln.strip()]
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if len(lines) != 1:
+        return lines
+    sole = lines[0]
+    if " " not in sole:
+        return lines
+    parts = sole.split()
+    if len(parts) < 2:
+        return lines
+    if not all(_looks_like_ipset_address_token(p) for p in parts):
+        return lines
+    return parts
 
 
 def _ipset_add_entry_core(
@@ -70,7 +100,7 @@ def _ipset_add_entry_core(
         raise typer.BadParameter("entry 不可為空。")
     if verify_absent and not dry_run:
         if _query_ipset_entry(name, ent, permanent=permanent):
-            console.print("[red]Refused:[/red] entry 已存在（--verify-absent）。")
+            console.print("[red]拒絕：[/red] entry 已存在（--verify-absent）。")
             raise typer.Exit(2)
     if not skip_confirm:
         _confirm(
@@ -110,14 +140,14 @@ def _ipset_remove_entry_core(
         raise typer.BadParameter("entry 不可為空。")
     if _ipset_name_ssh_caution(name) and not accept_ssh_ipset_risk:
         console.print(
-            "[red]Refused:[/red] ipset 名稱疑似與 SSH 白名單有關；"
+            "[red]拒絕：[/red] ipset 名稱疑似與 SSH 白名單有關；"
             "若確定要刪條目，請加 [bold]--accept-ssh-ipset-risk[/bold]。"
         )
         raise typer.Exit(2)
     if verify_present and not dry_run:
         if not _query_ipset_entry(name, ent, permanent=permanent):
             console.print(
-                "[red]Refused:[/red] entry 不存在或 query 失敗（請確認名稱、--permanent 與字串完全一致）。"
+                "[red]拒絕：[/red] entry 不存在或 query 失敗（請確認名稱、--permanent 與字串完全一致）。"
             )
             raise typer.Exit(2)
     if not skip_confirm:
@@ -218,10 +248,10 @@ def _ipset_new_core(
 
 def _rule_body(*, rule: Optional[str], rule_file: Optional[Path]) -> str:
     if (rule is None) == (rule_file is None):
-        raise typer.BadParameter("Provide exactly one of --rule or --rule-file.")
+        raise typer.BadParameter("請擇一提供 --rule 或 --rule-file。")
     if rule_file is not None:
         if not rule_file.is_file():
-            raise typer.BadParameter(f"Not a file: {rule_file}")
+            raise typer.BadParameter(f"不是檔案：{rule_file}")
         return rule_file.read_text(encoding="utf-8").strip()
     assert rule is not None
     return rule.strip()
@@ -229,7 +259,7 @@ def _rule_body(*, rule: Optional[str], rule_file: Optional[Path]) -> str:
 
 def _rule_tokens(rule_text: str) -> List[str]:
     if not rule_text:
-        raise typer.BadParameter("Rule text is empty.")
+        raise typer.BadParameter("規則內容為空。")
     return shlex.split(rule_text, posix=True)
 
 
@@ -260,16 +290,16 @@ def _validate_direct_target(
 ) -> Tuple[str, str, str]:
     fam = family.lower()
     if fam not in ("ipv4", "ipv6", "eb"):
-        raise typer.BadParameter("family must be one of: ipv4, ipv6, eb")
+        raise typer.BadParameter("family 必須為：ipv4、ipv6、eb 之一。")
     if not allow_unusual_chain:
         if table != "filter":
             raise typer.BadParameter(
-                f"table is {table!r} (not filter). If intentional, pass --allow-unusual-chain."
+                f"table 為 {table!r}（非 filter）。若為刻意設定，請加 --allow-unusual-chain。"
             )
         if chain not in _COMMON_CHAINS:
             raise typer.BadParameter(
-                f"chain {chain!r} is not one of {_COMMON_CHAINS}. "
-                "For PREROUTING/nat/raw etc., pass --allow-unusual-chain."
+                f"chain {chain!r} 不在 {_COMMON_CHAINS} 內。"
+                "若要 PREROUTING／nat／raw 等，請加 --allow-unusual-chain。"
             )
     return fam, table, chain
 
@@ -342,27 +372,27 @@ def _direct_add_core(
 ) -> None:
     if verify_absent and not dry_run:
         if _query_direct_rule(fam, tbl, ch, priority, tokens, permanent=permanent):
-            console.print("[red]Refused:[/red] an identical rule already exists (--verify-absent).")
+            console.print("[red]拒絕：[/red] 已存在相同規則（--verify-absent）。")
             raise typer.Exit(2)
 
     if _tokens_have_drop_or_reject(tokens):
         if not accept_drop_risk:
             console.print(
-                "[red]Refused:[/red] rule contains DROP/REJECT. "
-                "Re-run with [bold]--accept-drop-risk[/bold] after you confirmed management access."
+                "[red]拒絕：[/red] 規則含 DROP／REJECT。確認仍有管理連線後，請加 "
+                "[bold]--accept-drop-risk[/bold] 再執行。"
             )
             raise typer.Exit(2)
         if not skip_confirm:
             _confirm(
                 dry_run=dry_run,
                 yes=yes,
-                message="Add a DROP/REJECT direct rule (can lock out SSH or other access). Continue?",
+                message="要新增含 DROP／REJECT 的 direct 規則（可能鎖死 SSH 等）？是否繼續？",
             )
     elif not skip_confirm:
         _confirm(
             dry_run=dry_run,
             yes=yes,
-            message=f"Add direct rule {fam} {tbl} {ch} prio {priority}?",
+            message=f"要新增 direct 規則 {fam} {tbl} {ch} priority {priority}？",
         )
 
     if not dry_run:
@@ -377,9 +407,9 @@ def _direct_add_core(
     if dry_run:
         console.print("[yellow]dry-run:[/yellow]", " ".join(res.argv))
         return
-    console.print("[green]Added.[/green]", res.stdout.strip())
+    console.print("[green]已新增。[/green]", res.stdout.strip())
     if permanent and not dry_run:
-        console.print("[dim]Remember:[/dim] [bold]fwctl reload[/bold] if runtime should match permanent.")
+        console.print("[dim]若需 runtime 與 permanent 一致：[/dim] [bold]fwctl reload[/bold]")
 
 
 def _direct_remove_core(
@@ -400,16 +430,16 @@ def _direct_remove_core(
     if _rule_text_may_affect_ssh(body_for_ssh_check):
         if not accept_ssh_rule_risk:
             console.print(
-                "[red]Refused:[/red] this rule text may affect SSH. "
-                "Re-run with [bold]--accept-ssh-rule-risk[/bold] if you are sure."
+                "[red]拒絕：[/red] 規則文字可能影響 SSH。若確定要刪，請加 "
+                "[bold]--accept-ssh-rule-risk[/bold]。"
             )
             raise typer.Exit(2)
 
     if verify_present and not dry_run:
         if not _query_direct_rule(fam, tbl, ch, priority, tokens, permanent=permanent):
             console.print(
-                "[red]Refused:[/red] rule not present for this family/table/chain/priority/body "
-                "(check spelling; copy from `fwctl direct rules`)."
+                "[red]拒絕：[/red] 查無此規則（請核對 family／table／chain／priority／內容，"
+                "可從 `fwctl direct rules` 複製）。"
             )
             raise typer.Exit(2)
 
@@ -417,7 +447,7 @@ def _direct_remove_core(
         _confirm(
             dry_run=dry_run,
             yes=yes,
-            message=f"Remove direct rule {fam} {tbl} {ch} prio {priority}?",
+            message=f"要移除 direct 規則 {fam} {tbl} {ch} priority {priority}？",
         )
 
     if not dry_run:
@@ -432,9 +462,9 @@ def _direct_remove_core(
     if dry_run:
         console.print("[yellow]dry-run:[/yellow]", " ".join(res.argv))
         return
-    console.print("[green]Removed.[/green]", res.stdout.strip())
+    console.print("[green]已移除。[/green]", res.stdout.strip())
     if permanent and not dry_run:
-        console.print("[dim]Remember:[/dim] [bold]fwctl reload[/bold] if runtime should match permanent.")
+        console.print("[dim]若需 runtime 與 permanent 一致：[/dim] [bold]fwctl reload[/bold]")
 
 
 @ipset_app.command("list")
@@ -443,7 +473,7 @@ def ipset_list(
         False,
         "--permanent",
         "-p",
-        help="Use permanent configuration instead of runtime.",
+        help="讀取 permanent 設定（短選項請用 -p，勿用 --p）。",
     ),
 ) -> None:
     args: List[str] = [*_perm(permanent), "--get-ipsets"]
@@ -453,17 +483,23 @@ def ipset_list(
         print_firewall_cmd_error(console, e)
         raise typer.Exit(e.code) from e
     names = split_space_list(out)
-    print_lines_table(console, "IPSets", names, column_name="ipset")
+    title = "ipsets（permanent）" if permanent else "ipsets（runtime）"
+    print_lines_table(console, title, names, column_name="ipset")
 
 
 @ipset_app.command("show")
 def ipset_show(
-    name: str = typer.Argument(..., metavar="NAME", help="ipset name."),
-    permanent: bool = typer.Option(False, "--permanent", "-p"),
+    name: str = typer.Argument(..., metavar="NAME", help="ipset 名稱。"),
+    permanent: bool = typer.Option(
+        False,
+        "--permanent",
+        "-p",
+        help="讀取 permanent（短選項請用 -p）。",
+    ),
     entries: bool = typer.Option(
         True,
         "--entries/--no-entries",
-        help="Also run --get-entries for this ipset (default on).",
+        help="一併執行 --get-entries（預設開；多筆 IP 會盡量分行顯示）。",
     ),
 ) -> None:
     args_info: List[str] = [*_perm(permanent), f"--info-ipset={name}"]
@@ -481,9 +517,10 @@ def ipset_show(
     try:
         ent = run_firewall_cmd(args_ent, check=True).stdout
     except FirewallCmdError as e:
-        console.print(f"[dim]entries: {e}[/dim]")
+        console.print(f"[dim]條目：{e}[/dim]")
         return
-    text = ent.strip() or "(no entries)"
+    items = _parse_ipset_entries_stdout(ent)
+    text = "\n".join(items) if items else "（無條目）"
     console.print(Panel(text, title=f"ipset entries: {name}", expand=False))
 
 
@@ -541,6 +578,57 @@ def ipset_remove_entry(
         accept_ssh_ipset_risk=accept_ssh_ipset_risk,
         skip_confirm=False,
     )
+
+
+@ipset_app.command("delete")
+def ipset_delete_whole(
+    name: str = typer.Argument(..., metavar="NAME", help="要刪除的整個 ipset 名稱（僅寫入 permanent，[P]）。"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    yes: bool = typer.Option(False, "--yes", "-y"),
+    typed_delete_token: str = typer.Option(
+        "",
+        "--typed-delete-token",
+        help="非 dry-run 時必填，值必須為大寫 DELETE-IPSET。",
+    ),
+    accept_ssh_ipset_risk: bool = typer.Option(
+        False,
+        "--accept-ssh-ipset-risk",
+        help="當 ipset 名稱含 ssh（不分大小寫）時必傳。",
+    ),
+) -> None:
+    """刪除整個 ipset（`firewall-cmd --delete-ipset`）；高風險，僅 permanent。"""
+    if _ipset_name_ssh_caution(name) and not accept_ssh_ipset_risk:
+        console.print(
+            "[red]拒絕：[/red] ipset 名稱疑似與 SSH 白名單有關；請加 [bold]--accept-ssh-ipset-risk[/bold]。"
+        )
+        raise typer.Exit(2)
+    if not dry_run and typed_delete_token.strip() != "DELETE-IPSET":
+        console.print(
+            "[red]拒絕：[/red] 刪除整個 ipset 風險極高；非 dry-run 時請傳 "
+            "[bold]--typed-delete-token=DELETE-IPSET[/bold]（全大寫）。"
+        )
+        raise typer.Exit(2)
+    if not _ipset_exists_anywhere(name):
+        console.print("[red]找不到此 ipset（runtime／permanent 皆無 --info-ipset）。[/red]")
+        raise typer.Exit(2)
+    _confirm(
+        dry_run=dry_run,
+        yes=yes,
+        message=f"永久刪除整個 ipset {name!r}（含所有條目）？此動作無法由 fwctl 復原。",
+    )
+    if not dry_run:
+        require_root("delete ipsets")
+    args: List[str] = [*_perm(True), f"--delete-ipset={name}"]
+    try:
+        res = run_firewall_cmd(args, check=True, dry_run=dry_run)
+    except FirewallCmdError as e:
+        print_firewall_cmd_error(console, e)
+        raise typer.Exit(e.code) from e
+    if dry_run:
+        console.print("[yellow]dry-run:[/yellow]", " ".join(res.argv))
+        return
+    console.print("[green]OK[/green]", res.stdout.strip())
+    console.print("[dim]已從 permanent 設定移除；若需 runtime 同步：[/dim] [bold]fwctl reload[/bold]")
 
 
 def _wizard_ipset_add_entry_to_existing(*, yes_wizard: bool) -> None:
@@ -874,22 +962,32 @@ def ipset_wizard_remove(
 
 @direct_app.command("rules")
 def direct_rules(
-    permanent: bool = typer.Option(False, "--permanent", "-p"),
+    permanent: bool = typer.Option(
+        False,
+        "--permanent",
+        "-p",
+        help="讀取 permanent；短選項為 -p（勿寫成 --p）。",
+    ),
 ) -> None:
-    """Show all direct rules (`firewall-cmd --direct --get-all-rules`)."""
+    """列出所有 direct 規則（`firewall-cmd --direct --get-all-rules`）。"""
     args: List[str] = [*_perm(permanent), "--direct", "--get-all-rules"]
     try:
         out = run_firewall_cmd(args, check=True).stdout
     except FirewallCmdError as e:
         print_firewall_cmd_error(console, e)
         raise typer.Exit(e.code) from e
-    text = out.strip() or "(none)"
+    text = out.strip() or "（無）"
     console.print(Panel(text, title="direct rules (--get-all-rules)", expand=False))
 
 
 @direct_app.command("chains")
 def direct_chains(
-    permanent: bool = typer.Option(False, "--permanent", "-p"),
+    permanent: bool = typer.Option(
+        False,
+        "--permanent",
+        "-p",
+        help="讀取 permanent；短選項為 -p。",
+    ),
 ) -> None:
     args: List[str] = [*_perm(permanent), "--direct", "--get-all-chains"]
     try:
@@ -897,13 +995,18 @@ def direct_chains(
     except FirewallCmdError as e:
         print_firewall_cmd_error(console, e)
         raise typer.Exit(e.code) from e
-    text = out.strip() or "(none)"
+    text = out.strip() or "（無）"
     console.print(Panel(text, title="direct chains", expand=False))
 
 
 @direct_app.command("passthroughs")
 def direct_passthroughs(
-    permanent: bool = typer.Option(False, "--permanent", "-p"),
+    permanent: bool = typer.Option(
+        False,
+        "--permanent",
+        "-p",
+        help="讀取 permanent；短選項為 -p。",
+    ),
 ) -> None:
     args: List[str] = [*_perm(permanent), "--direct", "--get-all-passthroughs"]
     try:
@@ -911,7 +1014,7 @@ def direct_passthroughs(
     except FirewallCmdError as e:
         print_firewall_cmd_error(console, e)
         raise typer.Exit(e.code) from e
-    text = out.strip() or "(none)"
+    text = out.strip() or "（無）"
     console.print(Panel(text, title="direct passthroughs", expand=False))
 
 
@@ -921,47 +1024,52 @@ def direct_rule_add(
         ...,
         "--chain",
         "-c",
-        help="Chain name, e.g. INPUT, OUTPUT (see --allow-unusual-chain).",
+        help="鏈名稱，例如 INPUT、OUTPUT（見 --allow-unusual-chain）。",
     ),
     priority: int = typer.Option(
         ...,
         "--priority",
         "-n",
-        help="Priority number in that chain (same as firewall-cmd direct).",
+        help="該鏈上的 priority（與 firewall-cmd direct 相同）。",
     ),
     family: str = typer.Option("ipv4", "--family", help="ipv4 | ipv6 | eb"),
-    table: str = typer.Option("filter", "--table", help="Usually filter."),
+    table: str = typer.Option("filter", "--table", help="通常為 filter。"),
     rule: Optional[str] = typer.Option(
         None,
         "--rule",
         "-r",
-        help="iptables arguments after priority (quote for shell).",
+        help="priority 之後的 iptables 參數（shell 請加引號）。",
     ),
     rule_file: Optional[Path] = typer.Option(
         None,
         "--rule-file",
-        help="Read rule tail from file (same content as --rule).",
+        help="從檔案讀取與 --rule 相同內容。",
     ),
-    permanent: bool = typer.Option(False, "--permanent", "-p"),
+    permanent: bool = typer.Option(
+        False,
+        "--permanent",
+        "-p",
+        help="寫入 permanent；短選項為 -p。",
+    ),
     dry_run: bool = typer.Option(False, "--dry-run"),
     yes: bool = typer.Option(False, "--yes", "-y"),
     accept_drop_risk: bool = typer.Option(
         False,
         "--accept-drop-risk",
-        help="Required if the rule contains -j DROP or -j REJECT.",
+        help="規則含 -j DROP 或 -j REJECT 時必傳。",
     ),
     allow_unusual_chain: bool = typer.Option(
         False,
         "--allow-unusual-chain",
-        help="Allow non-filter table or chain outside INPUT/OUTPUT/FORWARD.",
+        help="允許非 filter 表或 INPUT/OUTPUT/FORWARD 以外的鏈。",
     ),
     verify_absent: bool = typer.Option(
         False,
         "--verify-absent",
-        help="If set, refuse when an identical rule already exists (query-rule).",
+        help="若已存在相同規則（query-rule）則拒絕。",
     ),
 ) -> None:
-    """Add a direct rule (`firewall-cmd --direct --add-rule ...`)."""
+    """新增 direct 規則（`firewall-cmd --direct --add-rule …`）。"""
     body = _rule_body(rule=rule, rule_file=rule_file)
     tokens = _rule_tokens(body)
     fam, tbl, ch = _validate_direct_target(
@@ -990,22 +1098,27 @@ def direct_rule_remove(
     table: str = typer.Option("filter", "--table"),
     rule: Optional[str] = typer.Option(None, "--rule", "-r"),
     rule_file: Optional[Path] = typer.Option(None, "--rule-file"),
-    permanent: bool = typer.Option(False, "--permanent", "-p"),
+    permanent: bool = typer.Option(
+        False,
+        "--permanent",
+        "-p",
+        help="針對 permanent；短選項為 -p。",
+    ),
     dry_run: bool = typer.Option(False, "--dry-run"),
     yes: bool = typer.Option(False, "--yes", "-y"),
     allow_unusual_chain: bool = typer.Option(False, "--allow-unusual-chain"),
     verify_present: bool = typer.Option(
         True,
         "--verify-present/--no-verify-present",
-        help="Run --query-rule before remove (recommended).",
+        help="刪除前先 --query-rule（建議開）。",
     ),
     accept_ssh_rule_risk: bool = typer.Option(
         False,
         "--accept-ssh-rule-risk",
-        help="Required when the rule text looks SSH-related (port 22 / 'ssh').",
+        help="規則文字疑似與 SSH（22 等）有關時必傳。",
     ),
 ) -> None:
-    """Remove one direct rule; must match add-rule arguments exactly."""
+    """刪除一筆 direct 規則；參數須與 add 時完全一致。"""
     body = _rule_body(rule=rule, rule_file=rule_file)
     tokens = _rule_tokens(body)
     fam, tbl, ch = _validate_direct_target(
@@ -1033,7 +1146,7 @@ def _wizard_resolve_target(family: str, table: str, chain: str) -> Tuple[str, st
     except typer.BadParameter:
         if typer.confirm(
             "此組合不是預設的 filter + INPUT/OUTPUT/FORWARD。"
-            "若你確定要改 nat/PREROUTING/raw 等，請確認後繼續。",
+            "若確定要改 nat／PREROUTING／raw 等，請確認後繼續。",
             default=False,
         ):
             return _validate_direct_target(family, table, chain, allow_unusual_chain=True)
@@ -1054,7 +1167,7 @@ def direct_wizard_add(
         Panel(
             "依序回答問題；結束前會先顯示 [bold]dry-run[/bold] 指令。\n"
             "含 DROP/REJECT 時必須輸入大寫 [bold]DROP-RISK[/bold] 才可繼續。",
-            title="direct wizard-add",
+            title="direct 精靈（新增）",
             expand=False,
         )
     )
@@ -1146,7 +1259,7 @@ def direct_wizard_remove(
             "模式 1：貼上 `fwctl direct rules` 的一整行（含 priority 後規則）。\n"
             "模式 2：分欄輸入 family/table/chain/priority/rule。\n"
             "若規則疑似與 SSH 有關，必須輸入大寫 [bold]SSH-RISK[/bold]。",
-            title="direct wizard-remove",
+            title="direct 精靈（刪除）",
             expand=False,
         )
     )

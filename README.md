@@ -50,17 +50,19 @@ sudo /path/to/firewallTool/.venv/bin/fwctl status
 
 也可改用 `sudo env "PATH=$PATH" fwctl status`（視 `sudoers` 是否允許保留 PATH）。長期作法是把 `fwctl` 裝進系統路徑（例如 `/usr/local/bin`）或寫一條 root 也找得到的 wrapper。
 
+**CLI 小習慣**：說明請打 `fwctl --help` 或 `fwctl 子命令 --help`（不要用 `fwctl direct help`）。`--permanent` 的短寫是 **`-p`**（單 dash），`--p` 通常無效。詳見教學 **§2.4**。
+
 常用指令（多數變更需 **root**；變更類可用 `--dry-run` 預覽、`--yes` 略過確認）：
 
 | 目的 | 範例 |
 |------|------|
 | 總覽狀態 | `fwctl status` |
 | 含所有 zone 詳情 | `fwctl status --all-zones` |
-| Zone 列表／單一 zone | `fwctl zone list` · `fwctl zone show public` |
+| Zone 列表／單一 zone | `fwctl zone list` · `fwctl zone list -p` · `fwctl zone show public`（可加 `--permanent`） |
 | 服務／埠列表 | `fwctl service list` · `fwctl port list` |
 | 加服務（永久＋指定 zone） | `fwctl service add http --zone public --permanent --yes` |
 | Rich rules | `fwctl rule list` · `fwctl rule add --rule 'rule family=...'` |
-| ipset 列表／詳情／增刪條目 | `fwctl ipset list` · `fwctl ipset show MYSET` · `add-entry` / `remove-entry`；不熟可用 **`ipset wizard-add`** / **`wizard-remove`**（見教學 §6.5） |
+| ipset 列表／詳情／增刪條目／刪整組 | `fwctl ipset list` · `show` · `add-entry` / `remove-entry` · **`ipset delete`**（高風險，見教學）；不熟可用 **`ipset wizard-add`** / **`wizard-remove`**（§6.5） |
 | direct 規則 | `fwctl direct rules` · 另可 `direct chains`、`direct passthroughs` |
 | direct 新增／刪除 | `direct add` / `direct remove`（見教學）；不熟可用 **`direct wizard-add`** / **`wizard-remove`** |
 | 重載 runtime | `fwctl reload --yes` |

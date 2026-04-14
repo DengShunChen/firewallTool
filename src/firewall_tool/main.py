@@ -18,14 +18,13 @@ from firewall_tool.runner import set_use_offline
 app = typer.Typer(
     name="fwctl",
     no_args_is_help=True,
-    help="Query and manage firewalld via firewall-cmd (or firewall-offline-cmd with --offline).",
+    help="以 firewall-cmd（線上）或 firewall-offline-cmd（--offline）查詢／管理 firewalld。",
     rich_markup_mode="rich",
     epilog=(
-        "Runtime vs --permanent (online only): without --permanent, changes apply to the "
-        "running firewall only. With --permanent, changes are written to disk; use "
-        "`fwctl reload` (or firewall-cmd --reload) to load them into runtime. "
-        "With --offline, fwctl uses firewall-offline-cmd (on-disk config; no D-Bus); "
-        "`--permanent` is stripped automatically, and reload/panic are unavailable."
+        "線上模式：未加 --permanent 時變更套在 runtime；加 --permanent 寫入設定檔後，請用 "
+        "`fwctl reload`（或 `firewall-cmd --reload`）載入 runtime。 "
+        "使用 --offline 時改跑 firewall-offline-cmd（僅磁碟設定、無 D-Bus），"
+        "會自動略過 `--permanent` 旗標，且無法使用 reload／panic。"
     ),
 )
 
@@ -33,11 +32,11 @@ app = typer.Typer(
 @app.callback()
 def _root(
     ctx: typer.Context,
-    version: bool = typer.Option(False, "--version", help="Print version and exit."),
+    version: bool = typer.Option(False, "--version", help="顯示版本後結束。"),
     offline: bool = typer.Option(
         False,
         "--offline",
-        help="Use firewall-offline-cmd (firewalld may be stopped; edits on-disk only).",
+        help="改用 firewall-offline-cmd（daemon 可未啟動；只改磁碟設定）。",
     ),
 ) -> None:
     if version:
@@ -51,7 +50,7 @@ def reload_cmd(
     dry_run: bool = typer.Option(False, "--dry-run"),
     yes: bool = typer.Option(False, "--yes", "-y"),
 ) -> None:
-    """Reload runtime configuration from permanent rules."""
+    """依 permanent 設定重載 firewalld runtime。"""
     maintenance.reload_action(dry_run=dry_run, yes=yes)
 
 

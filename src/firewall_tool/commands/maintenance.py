@@ -15,18 +15,18 @@ from firewall_tool.runner import (
 )
 
 console = Console()
-panic_app = typer.Typer(help="Panic mode drops all routed traffic.")
+panic_app = typer.Typer(help="Panic 模式會丟棄幾乎所有轉送流量。")
 
 
 def reload_action(*, dry_run: bool, yes: bool) -> None:
     if is_offline():
         console.print(
-            "[red]reload is not available in --offline mode "
-            "(no runtime daemon). Start firewalld and run `fwctl reload` without --offline.[/red]"
+            "[red]offline 模式下無法 reload（無 runtime daemon）。"
+            "請啟動 firewalld 後，在不加 [bold]--offline[/bold] 的情況下執行 [bold]fwctl reload[/bold]。[/red]"
         )
         raise typer.Exit(2)
     if not dry_run and not yes:
-        typer.confirm("Reload firewalld runtime from permanent configuration?", abort=True)
+        typer.confirm("要從 permanent 設定重載 firewalld runtime 嗎？", default=False, abort=True)
     if not dry_run:
         require_root("reload firewalld")
     try:
@@ -37,7 +37,7 @@ def reload_action(*, dry_run: bool, yes: bool) -> None:
     if dry_run:
         console.print("[yellow]dry-run:[/yellow]", " ".join(res.argv))
         return
-    console.print("[green]Reloaded.[/green]", res.stdout.strip())
+    console.print("[green]已重載。[/green]", res.stdout.strip())
 
 
 @panic_app.command("on")
@@ -47,12 +47,12 @@ def panic_on(
 ) -> None:
     if is_offline():
         console.print(
-            "[red]panic is not available in --offline mode (runtime-only).[/red]"
+            "[red]offline 模式下無法使用 panic（僅 runtime）。[/red]"
         )
         raise typer.Exit(2)
     if not dry_run and not yes:
         typer.confirm(
-            "Enable panic mode? This will block essentially all network traffic.",
+            "要啟用 panic 模式嗎？將阻擋幾乎所有網路流量。",
             default=False,
             abort=True,
         )
@@ -66,7 +66,7 @@ def panic_on(
     if dry_run:
         console.print("[yellow]dry-run:[/yellow]", " ".join(res.argv))
         return
-    console.print("[red]Panic ON[/red]", res.stdout.strip())
+    console.print("[red]Panic 已開啟[/red]", res.stdout.strip())
 
 
 @panic_app.command("off")
@@ -76,11 +76,11 @@ def panic_off(
 ) -> None:
     if is_offline():
         console.print(
-            "[red]panic is not available in --offline mode (runtime-only).[/red]"
+            "[red]offline 模式下無法使用 panic（僅 runtime）。[/red]"
         )
         raise typer.Exit(2)
     if not dry_run and not yes:
-        typer.confirm("Disable panic mode?", default=True, abort=True)
+        typer.confirm("要關閉 panic 模式嗎？", default=True, abort=True)
     if not dry_run:
         require_root("disable panic mode")
     try:
@@ -91,4 +91,4 @@ def panic_off(
     if dry_run:
         console.print("[yellow]dry-run:[/yellow]", " ".join(res.argv))
         return
-    console.print("[green]Panic OFF[/green]", res.stdout.strip())
+    console.print("[green]Panic 已關閉[/green]", res.stdout.strip())

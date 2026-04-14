@@ -24,13 +24,17 @@ def print_lines_table(
     lines: Iterable[str],
     column_name: str = "entry",
 ) -> None:
-    table = Table(title=title)
+    """
+    將多行條目印在單欄表內；標題放在外層 Panel，避免窄終端下 Rich Table 內建
+    title 隨表格寬度強制折行而難讀。
+    """
+    table = Table(show_header=True, header_style="bold")
     table.add_column(column_name, overflow="fold")
     for line in lines:
         s = line.strip()
         if s:
             table.add_row(s)
-    console.print(table)
+    console.print(Panel(table, title=title, expand=False))
 
 
 def split_space_list(text: str) -> List[str]:

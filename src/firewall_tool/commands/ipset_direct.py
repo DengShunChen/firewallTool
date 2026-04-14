@@ -15,7 +15,7 @@ from firewall_tool.formatters import print_firewall_cmd_error, print_lines_table
 from firewall_tool.runner import FirewallCmdError, require_root, run_firewall_cmd
 
 console = Console()
-ipset_app = typer.Typer(help="List or inspect firewalld ipsets.")
+ipset_app = typer.Typer(help="List, inspect, or change firewalld ipsets.")
 direct_app = typer.Typer(help="Inspect or change firewalld --direct rules (guarded).")
 
 _COMMON_CHAINS = frozenset({"INPUT", "OUTPUT", "FORWARD"})
@@ -23,6 +23,197 @@ _COMMON_CHAINS = frozenset({"INPUT", "OUTPUT", "FORWARD"})
 
 def _perm(permanent: bool) -> List[str]:
     return ["--permanent"] if permanent else []
+
+
+def _ipset_name_ssh_caution(ipset_name: str) -> bool:
+    """True if mutating this ipset is likely to affect SSH allow-lists."""
+    return "ssh" in ipset_name.lower()
+
+
+def _query_ipset_entry(name: str, entry: str, *, permanent: bool) -> bool:
+    args: List[str] = [
+        *_perm(permanent),
+        f"--ipset={name}",
+        f"--query-entry={entry}",
+    ]
+    res = run_firewall_cmd(args, check=False, dry_run=False)
+    return res.code == 0
+
+
+def _get_ipset_entries_lines(name: str, *, permanent: bool) -> str:
+    """Raw stdout from --get-entries (for display / line splitting)."""
+    args: List[str] = [*_perm(permanent), f"--ipset={name}", "--get-entries"]
+    res = run_firewall_cmd(args, check=True)
+    return res.stdout
+
+
+def _parse_ipset_entries_stdout(stdout: str) -> List[str]:
+    """Split `firewall-cmd --get-entries` stdout into non-empty lines (one entry per line 為常見格式)。"""
+    text = stdout.strip()
+    if not text:
+        return []
+    return [ln.strip() for ln in text.splitlines() if ln.strip()]
+
+
+def _ipset_add_entry_core(
+    name: str,
+    entry: str,
+    *,
+    permanent: bool,
+    dry_run: bool,
+    yes: bool,
+    verify_absent: bool,
+    skip_confirm: bool = False,
+) -> None:
+    ent = entry.strip()
+    if not ent:
+        raise typer.BadParameter("entry 不可為空。")
+    if verify_absent and not dry_run:
+        if _query_ipset_entry(name, ent, permanent=permanent):
+            console.print("[red]Refused:[/red] entry 已存在（--verify-absent）。")
+            raise typer.Exit(2)
+    if not skip_confirm:
+        _confirm(
+            dry_run=dry_run,
+            yes=yes,
+            message=f"將條目 {ent!r} 加入 ipset {name!r}（permanent={permanent}）？",
+        )
+    if not dry_run:
+        require_root("modify ipsets")
+    args: List[str] = [*_perm(permanent), f"--ipset={name}", f"--add-entry={ent}"]
+    try:
+        res = run_firewall_cmd(args, check=True, dry_run=dry_run)
+    except FirewallCmdError as e:
+        print_firewall_cmd_error(console, e)
+        raise typer.Exit(e.code) from e
+    if dry_run:
+        console.print("[yellow]dry-run:[/yellow]", " ".join(res.argv))
+        return
+    console.print("[green]OK[/green]", res.stdout.strip())
+    if permanent:
+        console.print("[dim]若需 runtime 同步：[/dim] [bold]fwctl reload[/bold]")
+
+
+def _ipset_remove_entry_core(
+    name: str,
+    entry: str,
+    *,
+    permanent: bool,
+    dry_run: bool,
+    yes: bool,
+    verify_present: bool,
+    accept_ssh_ipset_risk: bool,
+    skip_confirm: bool = False,
+) -> None:
+    ent = entry.strip()
+    if not ent:
+        raise typer.BadParameter("entry 不可為空。")
+    if _ipset_name_ssh_caution(name) and not accept_ssh_ipset_risk:
+        console.print(
+            "[red]Refused:[/red] ipset 名稱疑似與 SSH 白名單有關；"
+            "若確定要刪條目，請加 [bold]--accept-ssh-ipset-risk[/bold]。"
+        )
+        raise typer.Exit(2)
+    if verify_present and not dry_run:
+        if not _query_ipset_entry(name, ent, permanent=permanent):
+            console.print(
+                "[red]Refused:[/red] entry 不存在或 query 失敗（請確認名稱、--permanent 與字串完全一致）。"
+            )
+            raise typer.Exit(2)
+    if not skip_confirm:
+        _confirm(
+            dry_run=dry_run,
+            yes=yes,
+            message=f"從 ipset {name!r} 移除條目 {ent!r}（permanent={permanent}）？",
+        )
+    if not dry_run:
+        require_root("modify ipsets")
+    args: List[str] = [*_perm(permanent), f"--ipset={name}", f"--remove-entry={ent}"]
+    try:
+        res = run_firewall_cmd(args, check=True, dry_run=dry_run)
+    except FirewallCmdError as e:
+        print_firewall_cmd_error(console, e)
+        raise typer.Exit(e.code) from e
+    if dry_run:
+        console.print("[yellow]dry-run:[/yellow]", " ".join(res.argv))
+        return
+    console.print("[green]OK[/green]", res.stdout.strip())
+    if permanent:
+        console.print("[dim]若需 runtime 同步：[/dim] [bold]fwctl reload[/bold]")
+
+
+def _ipset_exists_anywhere(name: str) -> bool:
+    """True if runtime 或 permanent 任一可查到此 ipset。"""
+    for use_perm in (False, True):
+        argv: List[str] = [*_perm(use_perm), f"--info-ipset={name}"]
+        if run_firewall_cmd(argv, check=False, dry_run=False).code == 0:
+            return True
+    return False
+
+
+def _print_ipsets_table_for_wizard(*, permanent: bool, subtitle: str) -> None:
+    """列出 `firewall-cmd --get-ipsets`（供精靈選名用）。"""
+    args: List[str] = [*_perm(permanent), "--get-ipsets"]
+    try:
+        out = run_firewall_cmd(args, check=True).stdout
+    except FirewallCmdError as e:
+        console.print(f"[yellow]無法取得 {subtitle} ipset 清單：[/yellow]", str(e))
+        return
+    names = split_space_list(out)
+    print_lines_table(console, f"現有 ipset（{subtitle}）", names, column_name="ipset")
+
+
+def _wizard_show_existing_ipset_names() -> None:
+    """精靈用：印出 runtime 與 permanent 的 ipset 名稱表。"""
+    console.print(
+        "[dim]以下與 [bold]fwctl ipset list[/bold] / [bold]fwctl ipset list --permanent[/bold] 相同來源；"
+        "請從表內擇一，或手動輸入與 firewalld 完全一致的名稱。[/dim]"
+    )
+    _print_ipsets_table_for_wizard(permanent=False, subtitle="runtime")
+    _print_ipsets_table_for_wizard(permanent=True, subtitle="permanent")
+
+
+def _ipset_new_core(
+    name: str,
+    ipset_type: str,
+    options: Sequence[str],
+    *,
+    dry_run: bool,
+    yes: bool,
+    skip_confirm: bool = False,
+) -> None:
+    """
+    建立空 ipset（`--new-ipset` + `--type`；線上模式 firewall-cmd 標為 [P]，故一律帶 `--permanent`）。
+    """
+    nm = name.strip()
+    if not nm:
+        raise typer.BadParameter("ipset 名稱不可為空。")
+    t = ipset_type.strip()
+    if not t:
+        raise typer.BadParameter("type 不可為空。")
+    if not skip_confirm:
+        _confirm(
+            dry_run=dry_run,
+            yes=yes,
+            message=f"建立新 ipset {nm!r}，type={t!r}？",
+        )
+    if not dry_run:
+        require_root("create ipsets")
+    args: List[str] = [*_perm(True), f"--new-ipset={nm}", f"--type={t}"]
+    for raw in options:
+        o = raw.strip()
+        if o:
+            args.append(f"--option={o}")
+    try:
+        res = run_firewall_cmd(args, check=True, dry_run=dry_run)
+    except FirewallCmdError as e:
+        print_firewall_cmd_error(console, e)
+        raise typer.Exit(e.code) from e
+    if dry_run:
+        console.print("[yellow]dry-run:[/yellow]", " ".join(res.argv))
+        return
+    console.print("[green]OK[/green]", res.stdout.strip())
+    console.print("[dim]新 ipset 寫入 permanent；若需 runtime 同步：[/dim] [bold]fwctl reload[/bold]")
 
 
 def _rule_body(*, rule: Optional[str], rule_file: Optional[Path]) -> str:
@@ -165,13 +356,13 @@ def _direct_add_core(
             _confirm(
                 dry_run=dry_run,
                 yes=yes,
-                msg="Add a DROP/REJECT direct rule (can lock out SSH or other access). Continue?",
+                message="Add a DROP/REJECT direct rule (can lock out SSH or other access). Continue?",
             )
     elif not skip_confirm:
         _confirm(
             dry_run=dry_run,
             yes=yes,
-            msg=f"Add direct rule {fam} {tbl} {ch} prio {priority}?",
+            message=f"Add direct rule {fam} {tbl} {ch} prio {priority}?",
         )
 
     if not dry_run:
@@ -226,7 +417,7 @@ def _direct_remove_core(
         _confirm(
             dry_run=dry_run,
             yes=yes,
-            msg=f"Remove direct rule {fam} {tbl} {ch} prio {priority}?",
+            message=f"Remove direct rule {fam} {tbl} {ch} prio {priority}?",
         )
 
     if not dry_run:
@@ -294,6 +485,391 @@ def ipset_show(
         return
     text = ent.strip() or "(no entries)"
     console.print(Panel(text, title=f"ipset entries: {name}", expand=False))
+
+
+@ipset_app.command("add-entry")
+def ipset_add_entry(
+    name: str = typer.Argument(..., metavar="NAME", help="ipset 名稱。"),
+    entry: str = typer.Argument(..., help="條目，例如 10.0.0.1 或 192.168.0.0/24（依 ipset type）。"),
+    permanent: bool = typer.Option(False, "--permanent", "-p"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    yes: bool = typer.Option(False, "--yes", "-y"),
+    verify_absent: bool = typer.Option(
+        False,
+        "--verify-absent",
+        help="若 entry 已存在（query-entry）則拒絕。",
+    ),
+) -> None:
+    """新增 ipset 條目（`--ipset=NAME --add-entry=…`）。"""
+    _ipset_add_entry_core(
+        name,
+        entry,
+        permanent=permanent,
+        dry_run=dry_run,
+        yes=yes,
+        verify_absent=verify_absent,
+        skip_confirm=False,
+    )
+
+
+@ipset_app.command("remove-entry")
+def ipset_remove_entry(
+    name: str = typer.Argument(..., metavar="NAME", help="ipset 名稱。"),
+    entry: str = typer.Argument(..., help="要移除的條目（須與 add 時字串一致）。"),
+    permanent: bool = typer.Option(False, "--permanent", "-p"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    yes: bool = typer.Option(False, "--yes", "-y"),
+    verify_present: bool = typer.Option(
+        True,
+        "--verify-present/--no-verify-present",
+        help="移除前先 query-entry（建議開）。",
+    ),
+    accept_ssh_ipset_risk: bool = typer.Option(
+        False,
+        "--accept-ssh-ipset-risk",
+        help="當 ipset 名稱含 ssh（不分大小寫）時必須加上，避免誤刪 SSH 白名單。",
+    ),
+) -> None:
+    """移除 ipset 條目（`--ipset=NAME --remove-entry=…`）。"""
+    _ipset_remove_entry_core(
+        name,
+        entry,
+        permanent=permanent,
+        dry_run=dry_run,
+        yes=yes,
+        verify_present=verify_present,
+        accept_ssh_ipset_risk=accept_ssh_ipset_risk,
+        skip_confirm=False,
+    )
+
+
+def _wizard_ipset_add_entry_to_existing(*, yes_wizard: bool) -> None:
+    """精靈分支：對已存在的 ipset 加入條目。"""
+    _wizard_show_existing_ipset_names()
+    name = typer.prompt("現有 ipset 名稱").strip()
+    if not name:
+        console.print("[red]名稱不可為空。[/red]")
+        raise typer.Exit(2)
+    if not _ipset_exists_anywhere(name):
+        console.print(
+            "[red]找不到此 ipset[/red]（runtime／permanent 的 --info-ipset 皆失敗）。"
+            "請確認名稱，或改選「建立新 ipset」。"
+        )
+        raise typer.Exit(2)
+    entry = typer.prompt(
+        "要加入的條目（須符合該 ipset 的 type，例如 10.0.0.1 或 192.168.0.0/24）"
+    ).strip()
+    if not entry:
+        console.print("[red]條目不可為空。[/red]")
+        raise typer.Exit(2)
+    permanent = typer.confirm("寫入 permanent 設定？", default=False)
+    verify_absent = typer.confirm("新增前檢查條目是否尚不存在（query-entry，建議開）？", default=True)
+
+    console.print(
+        Panel(
+            f"[bold]摘要[/bold]\n"
+            f"動作=加入條目  ipset={name!r} entry={entry!r}\n"
+            f"permanent={permanent} verify_absent={verify_absent}",
+            title="即將套用",
+            expand=False,
+        )
+    )
+    _ipset_add_entry_core(
+        name,
+        entry,
+        permanent=permanent,
+        dry_run=True,
+        yes=True,
+        verify_absent=False,
+        skip_confirm=True,
+    )
+
+    if yes_wizard:
+        run_for_real = True
+    else:
+        run_for_real = typer.confirm("以上為 dry-run。要實際執行嗎？（需要 root）", default=False)
+    if not run_for_real:
+        console.print("[dim]已取消，未寫入。[/dim]")
+        raise typer.Exit(0)
+
+    _ipset_add_entry_core(
+        name,
+        entry,
+        permanent=permanent,
+        dry_run=False,
+        yes=True,
+        verify_absent=verify_absent,
+        skip_confirm=True,
+    )
+
+
+def _wizard_ipset_create_new_then_optional_entry(*, yes_wizard: bool) -> None:
+    """精靈分支：建立新 ipset（--new-ipset），可選建立後立刻加第一筆條目。"""
+    console.print(
+        "[dim]firewall-cmd 的 --new-ipset 為 [P]；此分支一律使用 [bold]--permanent[/bold]。"
+        "完成後建議 [bold]fwctl reload[/bold] 讓 runtime 同步。[/dim]"
+    )
+    if typer.confirm("是否顯示本機支援的 ipset type（--get-ipset-types）？", default=False):
+        try:
+            types_out = run_firewall_cmd(["--get-ipset-types"], check=True).stdout
+            console.print(Panel(types_out.strip(), title="支援的 type", expand=False))
+        except FirewallCmdError as e:
+            print_firewall_cmd_error(console, e)
+
+    name = typer.prompt("新 ipset 名稱").strip()
+    if not name:
+        console.print("[red]名稱不可為空。[/red]")
+        raise typer.Exit(2)
+    if _ipset_exists_anywhere(name):
+        console.print(
+            "[red]已存在同名 ipset。[/red]請換名稱，或改選「在現有 ipset 加入條目」。"
+        )
+        raise typer.Exit(2)
+
+    ipset_type = typer.prompt("ipset type", default="hash:net").strip()
+    console.print(
+        "[dim]選填：每行一個 [bold]option[/bold]（會變成 `--option=…`，例 maxelem=65536），"
+        "僅 Enter 結束。[/dim]"
+    )
+    opt_lines: List[str] = []
+    while True:
+        line = typer.prompt("  option（空行結束）", default="").strip()
+        if not line:
+            break
+        opt_lines.append(line)
+
+    console.print(
+        Panel(
+            f"[bold]摘要[/bold]\n"
+            f"動作=建立新 ipset  name={name!r} type={ipset_type!r}\n"
+            f"options={opt_lines!r}",
+            title="即將套用",
+            expand=False,
+        )
+    )
+    _ipset_new_core(
+        name,
+        ipset_type,
+        opt_lines,
+        dry_run=True,
+        yes=True,
+        skip_confirm=True,
+    )
+
+    if yes_wizard:
+        run_new = True
+    else:
+        run_new = typer.confirm("以上為 dry-run。要實際建立 ipset 嗎？（需要 root）", default=False)
+    if not run_new:
+        console.print("[dim]已取消，未建立。[/dim]")
+        raise typer.Exit(0)
+
+    _ipset_new_core(
+        name,
+        ipset_type,
+        opt_lines,
+        dry_run=False,
+        yes=True,
+        skip_confirm=True,
+    )
+
+    if not typer.confirm("要立即加入第一筆條目嗎？", default=False):
+        return
+
+    entry = typer.prompt("第一筆條目").strip()
+    if not entry:
+        console.print("[yellow]略過：條目為空。[/yellow]")
+        return
+    verify_absent = typer.confirm("新增前檢查條目是否尚不存在（query-entry，建議開）？", default=True)
+    console.print(
+        Panel(
+            f"[bold]摘要[/bold]\n"
+            f"動作=加入條目  ipset={name!r} entry={entry!r}\n"
+            f"permanent=True verify_absent={verify_absent}\n"
+            f"[dim]（新建之 ipset 在 permanent，條目一併寫入 permanent）[/dim]",
+            title="即將套用",
+            expand=False,
+        )
+    )
+    _ipset_add_entry_core(
+        name,
+        entry,
+        permanent=True,
+        dry_run=True,
+        yes=True,
+        verify_absent=False,
+        skip_confirm=True,
+    )
+    if yes_wizard:
+        run_add = True
+    else:
+        run_add = typer.confirm("以上為 dry-run。要實際加入條目嗎？（需要 root）", default=False)
+    if not run_add:
+        console.print("[dim]已取消加入條目。[/dim]")
+        return
+    _ipset_add_entry_core(
+        name,
+        entry,
+        permanent=True,
+        dry_run=False,
+        yes=True,
+        verify_absent=verify_absent,
+        skip_confirm=True,
+    )
+
+
+@ipset_app.command("wizard-add")
+def ipset_wizard_add(
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="略過最後「真的要執行」的確認。",
+    ),
+) -> None:
+    """互動式引導：建立新 ipset，或對現有 ipset 加入條目（皆先 dry-run）。"""
+    console.print(
+        Panel(
+            "第一步請選擇目的：\n"
+            "  [bold]1[/bold] — 建立[bold]新的空[/bold] ipset（[cyan]--new-ipset[/cyan] + [cyan]--type[/cyan]，一律寫入 permanent）\n"
+            "  [bold]2[/bold] — 在[bold]現有[/bold] ipset [bold]加入條目[/bold]（[cyan]--add-entry[/cyan]；可選 runtime 或 permanent）\n"
+            "結束前會先顯示 [bold]dry-run[/bold] 指令。可先 [bold]fwctl ipset list[/bold] / [bold]ipset show NAME[/bold] 查現況。",
+            title="ipset wizard-add",
+            expand=False,
+        )
+    )
+    goal = typer.prompt("請輸入 1 或 2", default="2").strip()
+    if goal == "1":
+        _wizard_ipset_create_new_then_optional_entry(yes_wizard=yes)
+    elif goal == "2":
+        _wizard_ipset_add_entry_to_existing(yes_wizard=yes)
+    else:
+        console.print("[red]請輸入 1 或 2。[/red]")
+        raise typer.Exit(2)
+
+
+def _wizard_ipset_pick_remove_entry(*, name: str, permanent: bool) -> str:
+    """
+    以 --get-entries 取得條目並顯示編號清單；可選號或改手動輸入。
+    """
+    try:
+        raw = _get_ipset_entries_lines(name, permanent=permanent)
+    except FirewallCmdError as e:
+        print_firewall_cmd_error(console, e)
+        raise typer.Exit(e.code) from e
+    items = _parse_ipset_entries_stdout(raw)
+    if items:
+        console.print(
+            Panel(
+                "\n".join(f"  {i + 1}. {v}" for i, v in enumerate(items)),
+                title=f"現有條目（{name}）",
+                expand=False,
+            )
+        )
+        pick = typer.prompt(
+            "要刪除的條目編號（1–n），或輸入 0 改為手動輸入完整字串",
+            default="1",
+        ).strip()
+        try:
+            idx = int(pick, 10)
+        except ValueError:
+            console.print("[red]請輸入整數編號。[/red]")
+            raise typer.Exit(2) from None
+        if idx == 0:
+            return typer.prompt("條目字串（須與列表或 firewall-cmd 顯示一致）").strip()
+        if 1 <= idx <= len(items):
+            return items[idx - 1]
+        console.print("[red]編號超出範圍。[/red]")
+        raise typer.Exit(2)
+    console.print("[yellow]目前查無條目或為空；請手動輸入要刪除的條目字串。[/yellow]")
+    return typer.prompt("條目字串").strip()
+
+
+@ipset_app.command("wizard-remove")
+def ipset_wizard_remove(
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="略過最後「真的要執行」的確認（仍須通過 SSH 相關 ipset 打字關卡）。",
+    ),
+) -> None:
+    """互動式引導刪除 ipset 條目（可從現有條目清單選號）。"""
+    console.print(
+        Panel(
+            "先顯示 [bold]runtime／permanent[/bold] 的 ipset 名稱表（與 [bold]ipset wizard-add[/bold] 選 2 相同）。\n"
+            "輸入 ipset 名稱後，程式會以 [bold]--get-entries[/bold] 列出目前條目，再選編號或改手動輸入（字串須與 [bold]ipset show[/bold] 一致）。\n"
+            "若 ipset 名稱含 [bold]ssh[/bold]（不分大小寫），必須輸入大寫 [bold]SSH-IPSET-RISK[/bold]。",
+            title="ipset wizard-remove",
+            expand=False,
+        )
+    )
+    permanent = typer.confirm("針對 permanent 設定？", default=False)
+
+    _wizard_show_existing_ipset_names()
+
+    name = ""
+    entry = ""
+
+    name = typer.prompt("ipset 名稱").strip()
+    if not name:
+        console.print("[red]名稱不可為空。[/red]")
+        raise typer.Exit(2)
+    entry = _wizard_ipset_pick_remove_entry(name=name, permanent=permanent)
+
+    if not name or not entry:
+        console.print("[red]名稱與條目皆不可為空。[/red]")
+        raise typer.Exit(2)
+
+    verify_present = typer.confirm("刪除前先 query-entry 確認存在？（強烈建議）", default=True)
+
+    accept_ssh_ipset_risk = False
+    if _ipset_name_ssh_caution(name):
+        console.print("[yellow]偵測到 ipset 名稱可能與 SSH 白名單有關。[/yellow]")
+        token = typer.prompt("若仍要刪除，請輸入大寫 SSH-IPSET-RISK", default="").strip()
+        if token != "SSH-IPSET-RISK":
+            console.print("[red]已取消。[/red]")
+            raise typer.Exit(2)
+        accept_ssh_ipset_risk = True
+
+    console.print(
+        Panel(
+            f"[bold]摘要[/bold]\n"
+            f"ipset={name!r} entry={entry!r}\n"
+            f"permanent={permanent} verify_present={verify_present}",
+            title="即將套用",
+            expand=False,
+        )
+    )
+    _ipset_remove_entry_core(
+        name,
+        entry,
+        permanent=permanent,
+        dry_run=True,
+        yes=True,
+        verify_present=False,
+        accept_ssh_ipset_risk=accept_ssh_ipset_risk,
+        skip_confirm=True,
+    )
+
+    if yes:
+        run_for_real = True
+    else:
+        run_for_real = typer.confirm("以上為 dry-run。要實際刪除嗎？（需要 root）", default=False)
+    if not run_for_real:
+        console.print("[dim]已取消，未變更。[/dim]")
+        raise typer.Exit(0)
+
+    _ipset_remove_entry_core(
+        name,
+        entry,
+        permanent=permanent,
+        dry_run=False,
+        yes=True,
+        verify_present=verify_present,
+        accept_ssh_ipset_risk=accept_ssh_ipset_risk,
+        skip_confirm=True,
+    )
 
 
 @direct_app.command("rules")

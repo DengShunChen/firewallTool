@@ -60,7 +60,7 @@ sudo /path/to/firewallTool/.venv/bin/fwctl status
 | 服務／埠列表 | `fwctl service list` · `fwctl port list` |
 | 加服務（永久＋指定 zone） | `fwctl service add http --zone public --permanent --yes` |
 | Rich rules | `fwctl rule list` · `fwctl rule add --rule 'rule family=...'` |
-| ipset 列表／詳情 | `fwctl ipset list` · `fwctl ipset show MYSET`（可加 `--permanent`） |
+| ipset 列表／詳情／增刪條目 | `fwctl ipset list` · `fwctl ipset show MYSET` · `add-entry` / `remove-entry`；不熟可用 **`ipset wizard-add`** / **`wizard-remove`**（見教學 §6.5） |
 | direct 規則 | `fwctl direct rules` · 另可 `direct chains`、`direct passthroughs` |
 | direct 新增／刪除 | `direct add` / `direct remove`（見教學）；不熟可用 **`direct wizard-add`** / **`wizard-remove`** |
 | 重載 runtime | `fwctl reload --yes` |

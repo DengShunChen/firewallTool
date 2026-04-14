@@ -73,6 +73,166 @@ def test_direct_rules_argv(mock_run: mock.MagicMock) -> None:
     assert list(mock_run.call_args[0][0]) == ["--direct", "--get-all-rules"]
 
 
+@mock.patch("firewall_tool.commands.ipset_direct.run_firewall_cmd")
+def test_ipset_remove_entry_ssh_refuses_without_accept(mock_run: mock.MagicMock) -> None:
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        ["ipset", "remove-entry", "ssh-in", "10.0.0.1", "--yes", "--no-verify-present"],
+    )
+    assert r.exit_code == 2
+    mock_run.assert_not_called()
+
+
+@mock.patch("firewall_tool.commands.ipset_direct.require_root")
+@mock.patch("firewall_tool.commands.ipset_direct.run_firewall_cmd")
+def test_ipset_add_entry_argv(mock_run: mock.MagicMock, _nr: mock.MagicMock) -> None:
+    mock_run.return_value = RunResult(stdout="success\n", stderr="", code=0, argv=[])
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        ["ipset", "add-entry", "MYSET", "192.168.1.0/24", "--permanent", "--yes"],
+    )
+    assert r.exit_code == 0, r.stdout
+    mock_run.assert_called_once()
+    assert list(mock_run.call_args[0][0]) == [
+        "--permanent",
+        "--ipset=MYSET",
+        "--add-entry=192.168.1.0/24",
+    ]
+
+
+@mock.patch("firewall_tool.commands.ipset_direct.require_root")
+@mock.patch("firewall_tool.commands.ipset_direct.run_firewall_cmd")
+def test_ipset_remove_entry_query_then_remove(
+    mock_run: mock.MagicMock,
+    _nr: mock.MagicMock,
+) -> None:
+    mock_run.side_effect = [
+        RunResult(stdout="", stderr="", code=0, argv=[]),
+        RunResult(stdout="success\n", stderr="", code=0, argv=[]),
+    ]
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        [
+            "ipset",
+            "remove-entry",
+            "MYSET",
+            "10.0.0.1",
+            "--permanent",
+            "--yes",
+        ],
+    )
+    assert r.exit_code == 0, r.stdout
+    assert mock_run.call_count == 2
+    assert list(mock_run.call_args_list[0][0][0]) == [
+        "--permanent",
+        "--ipset=MYSET",
+        "--query-entry=10.0.0.1",
+    ]
+    assert list(mock_run.call_args_list[1][0][0]) == [
+        "--permanent",
+        "--ipset=MYSET",
+        "--remove-entry=10.0.0.1",
+    ]
+
+
+@mock.patch("firewall_tool.commands.ipset_direct.run_firewall_cmd")
+def test_ipset_wizard_add_dry_run_then_cancel(mock_run: mock.MagicMock) -> None:
+    mock_run.return_value = RunResult(stdout="", stderr="", code=0, argv=["/sbin/firewall-cmd", "argv"])
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        ["ipset", "wizard-add"],
+        input="2\nMYSET\n10.0.0.1\n\n\n\n",
+    )
+    assert r.exit_code == 0, r.stdout
+    add_calls = [
+        c
+        for c in mock_run.call_args_list
+        if c.args
+        and isinstance(c.args[0], (list, tuple))
+        and any(str(a).startswith("--add-entry") for a in c.args[0])
+    ]
+    assert len(add_calls) == 1
+    assert add_calls[0].kwargs.get("dry_run") is True
+
+
+@mock.patch("firewall_tool.commands.ipset_direct.run_firewall_cmd")
+def test_ipset_wizard_add_new_ipset_dry_run_then_cancel(mock_run: mock.MagicMock) -> None:
+    mock_run.side_effect = [
+        RunResult("", "", 1, []),
+        RunResult("", "", 1, []),
+        RunResult(
+            stdout="",
+            stderr="",
+            code=0,
+            argv=["/sbin/firewall-cmd", "--permanent", "--new-ipset=wiz", "--type=hash:net"],
+        ),
+    ]
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        ["ipset", "wizard-add"],
+        input="1\n\nwiz\nhash:net\n\n\n",
+    )
+    assert r.exit_code == 0, r.stdout
+    assert mock_run.call_count == 3
+    last = list(mock_run.call_args_list[2].args[0])
+    assert last[:4] == ["--permanent", "--new-ipset=wiz", "--type=hash:net"]
+    assert mock_run.call_args_list[2].kwargs.get("dry_run") is True
+
+
+@mock.patch("firewall_tool.commands.ipset_direct.run_firewall_cmd")
+def test_ipset_wizard_remove_dry_run_then_cancel(mock_run: mock.MagicMock) -> None:
+    mock_run.return_value = RunResult(stdout="", stderr="", code=0, argv=["/sbin/firewall-cmd", "argv"])
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        ["ipset", "wizard-remove"],
+        input="\nMYSET\n10.0.0.1\n\n\n",
+    )
+    assert r.exit_code == 0, r.stdout
+    remove_calls = [
+        c
+        for c in mock_run.call_args_list
+        if c.args
+        and isinstance(c.args[0], (list, tuple))
+        and any(str(a).startswith("--remove-entry") for a in c.args[0])
+    ]
+    assert len(remove_calls) == 1
+    assert remove_calls[0].kwargs.get("dry_run") is True
+    assert mock_run.call_count >= 4
+
+
+@mock.patch("firewall_tool.commands.ipset_direct.run_firewall_cmd")
+def test_ipset_wizard_remove_pick_entry_by_index(mock_run: mock.MagicMock) -> None:
+    mock_run.side_effect = [
+        RunResult("MYSET\n", "", 0, []),
+        RunResult("MYSET\n", "", 0, []),
+        RunResult("10.0.0.1\n10.0.0.2\n", "", 0, []),
+        RunResult("", "", 0, ["/sbin/firewall-cmd", "argv"]),
+    ]
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        ["ipset", "wizard-remove"],
+        input="\nMYSET\n\n\n\n",
+    )
+    assert r.exit_code == 0, r.stdout
+    remove_calls = [
+        c
+        for c in mock_run.call_args_list
+        if c.args
+        and isinstance(c.args[0], (list, tuple))
+        and any(str(a).startswith("--remove-entry") for a in c.args[0])
+    ]
+    assert len(remove_calls) == 1
+    assert "--remove-entry=10.0.0.1" in remove_calls[0].args[0]
+    assert remove_calls[0].kwargs.get("dry_run") is True
+
+
 def test_parse_direct_rules_line() -> None:
     line = (
         "ipv4 filter INPUT 512 -p tcp -m set --match-set ssh-in src "

@@ -9,6 +9,7 @@ import pytest
 
 from typer.testing import CliRunner
 
+from firewall_tool.commands.ipset_direct import _parse_direct_rules_line
 from firewall_tool.formatters import parse_active_zones, polkit_hint
 from firewall_tool.main import app
 from firewall_tool.runner import (
@@ -70,6 +71,16 @@ def test_direct_rules_argv(mock_run: mock.MagicMock) -> None:
     assert r.exit_code == 0, r.stdout
     mock_run.assert_called_once()
     assert list(mock_run.call_args[0][0]) == ["--direct", "--get-all-rules"]
+
+
+def test_parse_direct_rules_line() -> None:
+    line = (
+        "ipv4 filter INPUT 512 -p tcp -m set --match-set ssh-in src "
+        "--dport 22 -j ACCEPT"
+    )
+    fam, tbl, ch, pri, tok = _parse_direct_rules_line(line)
+    assert (fam, tbl, ch, pri) == ("ipv4", "filter", "INPUT", 512)
+    assert "-j" in tok and "ACCEPT" in tok
 
 
 def test_polkit_hint_detects_authorization_failed() -> None:

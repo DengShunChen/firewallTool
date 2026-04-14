@@ -118,6 +118,134 @@ def _query_direct_rule(
     return res.code == 0
 
 
+def _parse_direct_rules_line(line: str) -> Tuple[str, str, str, int, List[str]]:
+    """
+    Parse one line from `fwctl direct rules` / `firewall-cmd --get-all-rules`.
+
+    Format: <family> <table> <chain> <priority> <rule tokens...>
+    """
+    parts = shlex.split(line.strip())
+    if len(parts) < 5:
+        raise typer.BadParameter("至少需要：family table chain priority 以及一段 rule。")
+    fam, tbl, ch = parts[0], parts[1], parts[2]
+    try:
+        pri = int(parts[3])
+    except ValueError as e:
+        raise typer.BadParameter(f"priority 必須是整數：{parts[3]!r}") from e
+    return fam, tbl, ch, pri, parts[4:]
+
+
+def _direct_add_core(
+    fam: str,
+    tbl: str,
+    ch: str,
+    priority: int,
+    tokens: List[str],
+    *,
+    permanent: bool,
+    dry_run: bool,
+    yes: bool,
+    accept_drop_risk: bool,
+    verify_absent: bool,
+    skip_confirm: bool = False,
+) -> None:
+    if verify_absent and not dry_run:
+        if _query_direct_rule(fam, tbl, ch, priority, tokens, permanent=permanent):
+            console.print("[red]Refused:[/red] an identical rule already exists (--verify-absent).")
+            raise typer.Exit(2)
+
+    if _tokens_have_drop_or_reject(tokens):
+        if not accept_drop_risk:
+            console.print(
+                "[red]Refused:[/red] rule contains DROP/REJECT. "
+                "Re-run with [bold]--accept-drop-risk[/bold] after you confirmed management access."
+            )
+            raise typer.Exit(2)
+        if not skip_confirm:
+            _confirm(
+                dry_run=dry_run,
+                yes=yes,
+                msg="Add a DROP/REJECT direct rule (can lock out SSH or other access). Continue?",
+            )
+    elif not skip_confirm:
+        _confirm(
+            dry_run=dry_run,
+            yes=yes,
+            msg=f"Add direct rule {fam} {tbl} {ch} prio {priority}?",
+        )
+
+    if not dry_run:
+        require_root("add direct rules")
+    argv_tail = _direct_rule_argv_tail(fam, tbl, ch, priority, tokens)
+    args: List[str] = [*_perm(permanent), "--direct", "--add-rule", *argv_tail]
+    try:
+        res = run_firewall_cmd(args, check=True, dry_run=dry_run)
+    except FirewallCmdError as e:
+        print_firewall_cmd_error(console, e)
+        raise typer.Exit(e.code) from e
+    if dry_run:
+        console.print("[yellow]dry-run:[/yellow]", " ".join(res.argv))
+        return
+    console.print("[green]Added.[/green]", res.stdout.strip())
+    if permanent and not dry_run:
+        console.print("[dim]Remember:[/dim] [bold]fwctl reload[/bold] if runtime should match permanent.")
+
+
+def _direct_remove_core(
+    fam: str,
+    tbl: str,
+    ch: str,
+    priority: int,
+    tokens: List[str],
+    *,
+    body_for_ssh_check: str,
+    permanent: bool,
+    dry_run: bool,
+    yes: bool,
+    verify_present: bool,
+    accept_ssh_rule_risk: bool,
+    skip_confirm: bool = False,
+) -> None:
+    if _rule_text_may_affect_ssh(body_for_ssh_check):
+        if not accept_ssh_rule_risk:
+            console.print(
+                "[red]Refused:[/red] this rule text may affect SSH. "
+                "Re-run with [bold]--accept-ssh-rule-risk[/bold] if you are sure."
+            )
+            raise typer.Exit(2)
+
+    if verify_present and not dry_run:
+        if not _query_direct_rule(fam, tbl, ch, priority, tokens, permanent=permanent):
+            console.print(
+                "[red]Refused:[/red] rule not present for this family/table/chain/priority/body "
+                "(check spelling; copy from `fwctl direct rules`)."
+            )
+            raise typer.Exit(2)
+
+    if not skip_confirm:
+        _confirm(
+            dry_run=dry_run,
+            yes=yes,
+            msg=f"Remove direct rule {fam} {tbl} {ch} prio {priority}?",
+        )
+
+    if not dry_run:
+        require_root("remove direct rules")
+    argv_tail = _direct_rule_argv_tail(fam, tbl, ch, priority, tokens)
+    args: List[str] = [*_perm(permanent), "--direct", "--remove-rule", *argv_tail]
+    try:
+        res = run_firewall_cmd(args, check=True, dry_run=dry_run)
+    except FirewallCmdError as e:
+        print_firewall_cmd_error(console, e)
+        raise typer.Exit(e.code) from e
+    if dry_run:
+        console.print("[yellow]dry-run:[/yellow]", " ".join(res.argv))
+        return
+    console.print("[green]Removed.[/green]", res.stdout.strip())
+    if permanent and not dry_run:
+        console.print("[dim]Remember:[/dim] [bold]fwctl reload[/bold] if runtime should match permanent.")
+
+
 @ipset_app.command("list")
 def ipset_list(
     permanent: bool = typer.Option(
@@ -263,45 +391,19 @@ def direct_rule_add(
     fam, tbl, ch = _validate_direct_target(
         family, table, chain, allow_unusual_chain=allow_unusual_chain
     )
-    if verify_absent and not dry_run:
-        if _query_direct_rule(fam, tbl, ch, priority, tokens, permanent=permanent):
-            console.print("[red]Refused:[/red] an identical rule already exists (--verify-absent).")
-            raise typer.Exit(2)
-
-    if _tokens_have_drop_or_reject(tokens):
-        if not accept_drop_risk:
-            console.print(
-                "[red]Refused:[/red] rule contains DROP/REJECT. "
-                "Re-run with [bold]--accept-drop-risk[/bold] after you confirmed management access."
-            )
-            raise typer.Exit(2)
-        _confirm(
-            dry_run=dry_run,
-            yes=yes,
-            msg="Add a DROP/REJECT direct rule (can lock out SSH or other access). Continue?",
-        )
-    else:
-        _confirm(
-            dry_run=dry_run,
-            yes=yes,
-            msg=f"Add direct rule {fam} {tbl} {ch} prio {priority}?",
-        )
-
-    if not dry_run:
-        require_root("add direct rules")
-    argv_tail = _direct_rule_argv_tail(fam, tbl, ch, priority, tokens)
-    args: List[str] = [*_perm(permanent), "--direct", "--add-rule", *argv_tail]
-    try:
-        res = run_firewall_cmd(args, check=True, dry_run=dry_run)
-    except FirewallCmdError as e:
-        print_firewall_cmd_error(console, e)
-        raise typer.Exit(e.code) from e
-    if dry_run:
-        console.print("[yellow]dry-run:[/yellow]", " ".join(res.argv))
-        return
-    console.print("[green]Added.[/green]", res.stdout.strip())
-    if permanent and not dry_run:
-        console.print("[dim]Remember:[/dim] [bold]fwctl reload[/bold] if runtime should match permanent.")
+    _direct_add_core(
+        fam,
+        tbl,
+        ch,
+        priority,
+        list(tokens),
+        permanent=permanent,
+        dry_run=dry_run,
+        yes=yes,
+        accept_drop_risk=accept_drop_risk,
+        verify_absent=verify_absent,
+        skip_confirm=False,
+    )
 
 
 @direct_app.command("remove")
@@ -333,41 +435,229 @@ def direct_rule_remove(
     fam, tbl, ch = _validate_direct_target(
         family, table, chain, allow_unusual_chain=allow_unusual_chain
     )
-
-    if _rule_text_may_affect_ssh(body):
-        if not accept_ssh_rule_risk:
-            console.print(
-                "[red]Refused:[/red] this rule text may affect SSH. "
-                "Re-run with [bold]--accept-ssh-rule-risk[/bold] if you are sure."
-            )
-            raise typer.Exit(2)
-
-    if verify_present and not dry_run:
-        if not _query_direct_rule(fam, tbl, ch, priority, tokens, permanent=permanent):
-            console.print(
-                "[red]Refused:[/red] rule not present for this family/table/chain/priority/body "
-                "(check spelling; copy from `fwctl direct rules`)."
-            )
-            raise typer.Exit(2)
-
-    _confirm(
+    _direct_remove_core(
+        fam,
+        tbl,
+        ch,
+        priority,
+        list(tokens),
+        body_for_ssh_check=body,
+        permanent=permanent,
         dry_run=dry_run,
         yes=yes,
-        msg=f"Remove direct rule {fam} {tbl} {ch} prio {priority}?",
+        verify_present=verify_present,
+        accept_ssh_rule_risk=accept_ssh_rule_risk,
+        skip_confirm=False,
     )
 
-    if not dry_run:
-        require_root("remove direct rules")
-    argv_tail = _direct_rule_argv_tail(fam, tbl, ch, priority, tokens)
-    args: List[str] = [*_perm(permanent), "--direct", "--remove-rule", *argv_tail]
+
+def _wizard_resolve_target(family: str, table: str, chain: str) -> Tuple[str, str, str]:
     try:
-        res = run_firewall_cmd(args, check=True, dry_run=dry_run)
-    except FirewallCmdError as e:
-        print_firewall_cmd_error(console, e)
-        raise typer.Exit(e.code) from e
-    if dry_run:
-        console.print("[yellow]dry-run:[/yellow]", " ".join(res.argv))
-        return
-    console.print("[green]Removed.[/green]", res.stdout.strip())
-    if permanent and not dry_run:
-        console.print("[dim]Remember:[/dim] [bold]fwctl reload[/bold] if runtime should match permanent.")
+        return _validate_direct_target(family, table, chain, allow_unusual_chain=False)
+    except typer.BadParameter:
+        if typer.confirm(
+            "此組合不是預設的 filter + INPUT/OUTPUT/FORWARD。"
+            "若你確定要改 nat/PREROUTING/raw 等，請確認後繼續。",
+            default=False,
+        ):
+            return _validate_direct_target(family, table, chain, allow_unusual_chain=True)
+        raise typer.Exit(1) from None
+
+
+@direct_app.command("wizard-add")
+def direct_wizard_add(
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="略過最後「真的要執行」的確認（仍須通過 DROP 打字關卡）。",
+    ),
+) -> None:
+    """互動式引導新增 direct rule（含 dry-run 預覽與 DROP 打字防呆）。"""
+    console.print(
+        Panel(
+            "依序回答問題；結束前會先顯示 [bold]dry-run[/bold] 指令。\n"
+            "含 DROP/REJECT 時必須輸入大寫 [bold]DROP-RISK[/bold] 才可繼續。",
+            title="direct wizard-add",
+            expand=False,
+        )
+    )
+    family = typer.prompt("family", default="ipv4").strip()
+    table = typer.prompt("table", default="filter").strip()
+    chain = typer.prompt("chain（例如 INPUT）").strip()
+    priority = int(typer.prompt("priority（整數，可負數）"))
+    path_hint = typer.prompt("rule 用檔案提供？輸入路徑；否則直接 Enter", default="").strip()
+    if path_hint:
+        body = _rule_body(rule=None, rule_file=Path(path_hint).expanduser())
+    else:
+        body = typer.prompt("rule 尾端（priority 之後整段，注意 shell 引號）").strip()
+    tokens = _rule_tokens(body)
+
+    fam, tbl, ch = _wizard_resolve_target(family, table, chain)
+    permanent = typer.confirm("寫入 permanent 設定？", default=False)
+    verify_absent = typer.confirm("新增前檢查是否尚不存在相同規則（建議開）？", default=True)
+
+    accept_drop_risk = False
+    if _tokens_have_drop_or_reject(tokens):
+        console.print(
+            "[yellow]偵測到 DROP／REJECT：可能鎖死管理連線（含 SSH）。[/yellow]"
+        )
+        token = typer.prompt("若仍要新增，請輸入大寫 DROP-RISK", default="").strip()
+        if token != "DROP-RISK":
+            console.print("[red]已取消。[/red]")
+            raise typer.Exit(2)
+        accept_drop_risk = True
+
+    console.print(
+        Panel(
+            f"[bold]摘要[/bold]\n"
+            f"family={fam} table={tbl} chain={ch} priority={priority}\n"
+            f"permanent={permanent} verify_absent={verify_absent}\n"
+            f"rule_tokens={tokens!r}",
+            title="即將套用",
+            expand=False,
+        )
+    )
+    _direct_add_core(
+        fam,
+        tbl,
+        ch,
+        priority,
+        list(tokens),
+        permanent=permanent,
+        dry_run=True,
+        yes=True,
+        accept_drop_risk=accept_drop_risk,
+        verify_absent=False,
+        skip_confirm=True,
+    )
+
+    if yes:
+        run_for_real = True
+    else:
+        run_for_real = typer.confirm("以上為 dry-run。要實際執行嗎？（需要 root）", default=False)
+    if not run_for_real:
+        console.print("[dim]已取消，未寫入。[/dim]")
+        raise typer.Exit(0)
+
+    _direct_add_core(
+        fam,
+        tbl,
+        ch,
+        priority,
+        list(tokens),
+        permanent=permanent,
+        dry_run=False,
+        yes=True,
+        accept_drop_risk=accept_drop_risk,
+        verify_absent=verify_absent,
+        skip_confirm=True,
+    )
+
+
+@direct_app.command("wizard-remove")
+def direct_wizard_remove(
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="略過最後「真的要執行」的確認（仍須通過 SSH 相關打字關卡）。",
+    ),
+) -> None:
+    """互動式引導刪除 direct rule（可貼 `direct rules` 一整行）。"""
+    console.print(
+        Panel(
+            "模式 1：貼上 `fwctl direct rules` 的一整行（含 priority 後規則）。\n"
+            "模式 2：分欄輸入 family/table/chain/priority/rule。\n"
+            "若規則疑似與 SSH 有關，必須輸入大寫 [bold]SSH-RISK[/bold]。",
+            title="direct wizard-remove",
+            expand=False,
+        )
+    )
+    mode = typer.prompt("選擇模式", default="1").strip()
+    if mode == "1":
+        line = typer.prompt("貼上一整行").strip()
+        try:
+            fam, tbl, ch, priority, tokens = _parse_direct_rules_line(line)
+        except typer.BadParameter as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(2) from e
+        body = " ".join(tokens)
+    elif mode == "2":
+        family = typer.prompt("family", default="ipv4").strip()
+        table = typer.prompt("table", default="filter").strip()
+        chain = typer.prompt("chain").strip()
+        priority = int(typer.prompt("priority"))
+        path_hint = typer.prompt("rule 檔案路徑（無則 Enter）", default="").strip()
+        if path_hint:
+            body = _rule_body(rule=None, rule_file=Path(path_hint).expanduser())
+        else:
+            body = typer.prompt("rule 尾端").strip()
+        tokens = _rule_tokens(body)
+        fam, tbl, ch = _wizard_resolve_target(family, table, chain)
+    else:
+        console.print("[red]模式請輸入 1 或 2。[/red]")
+        raise typer.Exit(2)
+
+    if mode == "1":
+        fam, tbl, ch = _wizard_resolve_target(fam, tbl, ch)
+
+    permanent = typer.confirm("針對 permanent 設定？", default=False)
+    verify_present = typer.confirm("刪除前先 query 確認存在？（強烈建議）", default=True)
+
+    accept_ssh_rule_risk = False
+    if _rule_text_may_affect_ssh(body):
+        console.print("[yellow]偵測到可能與 SSH（22 等）有關的規則。[/yellow]")
+        token = typer.prompt("若仍要刪除，請輸入大寫 SSH-RISK", default="").strip()
+        if token != "SSH-RISK":
+            console.print("[red]已取消。[/red]")
+            raise typer.Exit(2)
+        accept_ssh_rule_risk = True
+
+    console.print(
+        Panel(
+            f"[bold]摘要[/bold]\n"
+            f"family={fam} table={tbl} chain={ch} priority={priority}\n"
+            f"permanent={permanent} verify_present={verify_present}\n"
+            f"rule_tokens={tokens!r}",
+            title="即將套用",
+            expand=False,
+        )
+    )
+    _direct_remove_core(
+        fam,
+        tbl,
+        ch,
+        priority,
+        list(tokens),
+        body_for_ssh_check=body,
+        permanent=permanent,
+        dry_run=True,
+        yes=True,
+        verify_present=False,
+        accept_ssh_rule_risk=accept_ssh_rule_risk,
+        skip_confirm=True,
+    )
+
+    if yes:
+        run_for_real = True
+    else:
+        run_for_real = typer.confirm("以上為 dry-run。要實際刪除嗎？（需要 root）", default=False)
+    if not run_for_real:
+        console.print("[dim]已取消，未變更。[/dim]")
+        raise typer.Exit(0)
+
+    _direct_remove_core(
+        fam,
+        tbl,
+        ch,
+        priority,
+        list(tokens),
+        body_for_ssh_check=body,
+        permanent=permanent,
+        dry_run=False,
+        yes=True,
+        verify_present=verify_present,
+        accept_ssh_rule_risk=accept_ssh_rule_risk,
+        skip_confirm=True,
+    )

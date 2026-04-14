@@ -62,7 +62,7 @@ sudo /path/to/firewallTool/.venv/bin/fwctl status
 | Rich rules | `fwctl rule list` · `fwctl rule add --rule 'rule family=...'` |
 | ipset 列表／詳情 | `fwctl ipset list` · `fwctl ipset show MYSET`（可加 `--permanent`） |
 | direct 規則 | `fwctl direct rules` · 另可 `direct chains`、`direct passthroughs` |
-| direct 新增／刪除 | 見下方「direct 防呆」；務必先 `--dry-run` |
+| direct 新增／刪除 | `direct add` / `direct remove`（見教學）；不熟可用 **`direct wizard-add`** / **`wizard-remove`** |
 | 重載 runtime | `fwctl reload --yes` |
 | 緊急 panic | `fwctl panic on` · `fwctl panic off` |
 

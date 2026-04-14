@@ -7,9 +7,10 @@ from typing import List, Optional
 import typer
 from rich.console import Console
 
-from firewall_tool.formatters import print_lines_table
+from firewall_tool.formatters import print_firewall_cmd_error, print_lines_table
 from firewall_tool.runner import (
     FirewallCmdError,
+    is_offline,
     require_root,
     run_firewall_cmd,
 )
@@ -48,7 +49,7 @@ def service_list(
     try:
         out = run_firewall_cmd(args, check=True).stdout
     except FirewallCmdError as e:
-        console.print(f"[red]{e}[/red]")
+        print_firewall_cmd_error(console, e)
         raise typer.Exit(e.code) from e
     lines = [x for x in out.split() if x.strip()]
     print_lines_table(console, "Services", lines, column_name="service")
@@ -78,16 +79,17 @@ def service_add(
     try:
         res = run_firewall_cmd(args, check=True, dry_run=dry_run)
     except FirewallCmdError as e:
-        console.print(f"[red]{e}[/red]")
+        print_firewall_cmd_error(console, e)
         raise typer.Exit(e.code) from e
     if dry_run:
         console.print("[yellow]dry-run:[/yellow]", " ".join(res.argv))
-        console.print(
-            "[dim]If --permanent, run `firewall-cmd --reload` to apply to runtime.[/dim]"
-        )
+        if not is_offline():
+            console.print(
+                "[dim]If --permanent, run `firewall-cmd --reload` to apply to runtime.[/dim]"
+            )
         return
     console.print("[green]OK[/green]", res.stdout.strip())
-    if permanent:
+    if permanent and not is_offline():
         console.print("[dim]Remember: `fwctl reload` or firewall-cmd --reload[/dim]")
 
 
@@ -115,7 +117,7 @@ def service_remove(
     try:
         res = run_firewall_cmd(args, check=True, dry_run=dry_run)
     except FirewallCmdError as e:
-        console.print(f"[red]{e}[/red]")
+        print_firewall_cmd_error(console, e)
         raise typer.Exit(e.code) from e
     if dry_run:
         console.print("[yellow]dry-run:[/yellow]", " ".join(res.argv))
@@ -132,7 +134,7 @@ def port_list(
     try:
         out = run_firewall_cmd(args, check=True).stdout
     except FirewallCmdError as e:
-        console.print(f"[red]{e}[/red]")
+        print_firewall_cmd_error(console, e)
         raise typer.Exit(e.code) from e
     parts = [p.strip() for p in out.split() if p.strip()]
     print_lines_table(console, "Ports", parts, column_name="port")
@@ -164,13 +166,13 @@ def port_add(
     try:
         res = run_firewall_cmd(args, check=True, dry_run=dry_run)
     except FirewallCmdError as e:
-        console.print(f"[red]{e}[/red]")
+        print_firewall_cmd_error(console, e)
         raise typer.Exit(e.code) from e
     if dry_run:
         console.print("[yellow]dry-run:[/yellow]", " ".join(res.argv))
         return
     console.print("[green]OK[/green]", res.stdout.strip())
-    if permanent:
+    if permanent and not is_offline():
         console.print("[dim]Remember: reload if you expect runtime to match permanent.[/dim]")
 
 
@@ -197,7 +199,7 @@ def port_remove(
     try:
         res = run_firewall_cmd(args, check=True, dry_run=dry_run)
     except FirewallCmdError as e:
-        console.print(f"[red]{e}[/red]")
+        print_firewall_cmd_error(console, e)
         raise typer.Exit(e.code) from e
     if dry_run:
         console.print("[yellow]dry-run:[/yellow]", " ".join(res.argv))

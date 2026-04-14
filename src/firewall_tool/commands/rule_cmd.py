@@ -9,6 +9,8 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
+from firewall_tool.formatters import print_firewall_cmd_error
+
 from firewall_tool.runner import (
     FirewallCmdError,
     require_root,
@@ -36,7 +38,7 @@ def rule_list(
     try:
         out = run_firewall_cmd(args, check=True).stdout
     except FirewallCmdError as e:
-        console.print(f"[red]{e}[/red]")
+        print_firewall_cmd_error(console, e)
         raise typer.Exit(e.code) from e
     text = out.strip() or "(none)"
     console.print(Panel(text, title="Rich rules", expand=False))
@@ -83,7 +85,7 @@ def rule_add(
     try:
         res = run_firewall_cmd(args, check=True, dry_run=dry_run)
     except FirewallCmdError as e:
-        console.print(f"[red]{e}[/red]")
+        print_firewall_cmd_error(console, e)
         raise typer.Exit(e.code) from e
     if dry_run:
         console.print("[yellow]dry-run:[/yellow]", " ".join(res.argv))
@@ -122,7 +124,7 @@ def rule_remove(
     try:
         res = run_firewall_cmd(args, check=True, dry_run=dry_run)
     except FirewallCmdError as e:
-        console.print(f"[red]{e}[/red]")
+        print_firewall_cmd_error(console, e)
         raise typer.Exit(e.code) from e
     if dry_run:
         console.print("[yellow]dry-run:[/yellow]", " ".join(res.argv))

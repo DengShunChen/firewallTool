@@ -8,6 +8,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from firewall_tool.runner import FirewallCmdError
+
 
 def print_kv(console: Console, title: str, rows: Sequence[Tuple[str, str]]) -> None:
     table = Table(show_header=False, box=None, padding=(0, 2))
@@ -54,3 +56,30 @@ def parse_active_zones(text: str) -> List[Tuple[str, str]]:
     if current_zone is not None:
         rows.append((current_zone, "\n".join(buf).strip()))
     return rows
+
+
+def polkit_hint(text: str) -> Optional[str]:
+    """若錯誤來自 PolicyKit／權限，回傳簡短處置說明。"""
+    t = text.lower()
+    if (
+        "authorization failed" in t
+        or "polkit" in t
+        or "superuser" in t
+        or "not authorized" in t
+    ):
+        return (
+            "此主機未授權目前使用者存取 firewalld（PolicyKit）：請以 [bold]root[/bold] 跑同一支程式。"
+            "\n若直接打 [bold]sudo fwctl[/bold] 卻出現 [bold]command not found[/bold]，是因為 sudo 會縮小 PATH，"
+            "找不到 venv 裡的 [bold]fwctl[/bold]；請改用：\n"
+            "[bold]sudo \"$(command -v fwctl)\" status[/bold]（把 status 換成你的子命令）。"
+            "\n或在圖形／[bold]ssh -X[/bold] 環境啟好 polkit agent 再試一般使用者執行。"
+        )
+    return None
+
+
+def print_firewall_cmd_error(console: Console, exc: FirewallCmdError) -> None:
+    """印出 firewall 後端錯誤；若為 Polkit 相關則多一行提示。"""
+    console.print(f"[red]{exc}[/red]")
+    hint = polkit_hint(f"{exc.stderr}\n{exc}")
+    if hint:
+        console.print(f"[yellow]{hint}[/yellow]")

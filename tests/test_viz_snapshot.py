@@ -11,7 +11,12 @@ from typer.testing import CliRunner
 from firewall_tool.main import app
 from firewall_tool.runner import RunResult, set_use_offline
 from firewall_tool.viz.html_report import generate_html_report
+from firewall_tool.viz.markdown_report import generate_markdown_report
 from firewall_tool.viz.ip_compact import build_ipset_compact_fields, collapse_ip_tokens
+from firewall_tool.viz.network_allow_extract import (
+    build_direct_allow_matrix,
+    extract_direct_tokens_semantics,
+)
 from firewall_tool.viz.snapshot import (
     compute_zone_drift,
     parse_direct_rule_line,
@@ -43,6 +48,52 @@ home
   ports:
   rich rules:
 """
+
+
+def test_extract_direct_tokens_semantics_multiport() -> None:
+    sem = extract_direct_tokens_semantics(
+        ["-m", "multiport", "--dports", "80,443", "-p", "tcp", "-j", "ACCEPT"]
+    )
+    assert "80" in sem["dports"] and "443" in sem["dports"]
+
+
+def test_direct_allow_matrix_resolves_ipset() -> None:
+    snap = {
+        "direct_rules_parsed": [
+            {
+                "raw": "ipv4 filter INPUT 0 -m set --match-set wl src -p tcp --dport 443 -j ACCEPT",
+                "parse_error": False,
+                "family": "ipv4",
+                "table": "filter",
+                "chain": "INPUT",
+                "priority": 0,
+                "tokens": [
+                    "-m",
+                    "set",
+                    "--match-set",
+                    "wl",
+                    "src",
+                    "-p",
+                    "tcp",
+                    "--dport",
+                    "443",
+                    "-j",
+                    "ACCEPT",
+                ],
+            }
+        ],
+        "ipsets": {
+            "details": {
+                "runtime": [{"name": "wl", "entries_summary": "摘要測試", "entries_compact": ["1.1.1.1"]}],
+                "permanent": [],
+            }
+        },
+    }
+    m = build_direct_allow_matrix(snap)
+    assert len(m["input"]) == 1
+    assert m["input"][0]["dports"] == ["443"]
+    assert m["input"][0]["ipset_resolved"][0]["name"] == "wl"
+    assert "摘要測試" in m["input"][0]["ipset_resolved"][0]["entries_summary"]
 
 
 def test_bracket_two_hosts() -> None:
@@ -118,6 +169,35 @@ public (active)
     assert z["lists"]["ports"]["only_permanent"] == ["443/tcp"]
 
 
+def test_generate_markdown_report_offline_snapshot() -> None:
+    snap = {
+        "schema_version": 2,
+        "generated_at": "2026-01-01T00:00:00Z",
+        "backend": "firewall-offline-cmd",
+        "default_zone": "public",
+        "runtime": None,
+        "permanent": {
+            "zones": [
+                {
+                    "name": "public",
+                    "active": False,
+                    "attributes": {"services": ["ssh"], "interfaces": ["eth0"]},
+                    "rich_rules": [],
+                }
+            ]
+        },
+        "drift_available": False,
+        "drift": {"note": "offline 模式僅磁碟設定，無 runtime／permanent 對照。"},
+        "ipsets": {"runtime": [], "permanent": ["x"], "details": {"runtime": [], "permanent": []}},
+        "direct_rules": [],
+        "direct_rules_parsed": [],
+    }
+    md = generate_markdown_report(snap)
+    assert "防火牆快照" in md
+    assert "```mermaid" in md
+    assert "offline" in md
+
+
 def test_generate_html_offline_drift_message() -> None:
     snap = {
         "schema_version": 1,
@@ -147,6 +227,7 @@ def test_generate_html_offline_drift_message() -> None:
     assert "blocklist" in html
     assert "預設 zone: public" in html
     assert "名稱分布（Mermaid）" in html
+    assert "Direct 允許流量摘要" in html
 
 
 def test_snapshot_to_json_roundtrip_keys() -> None:
@@ -196,7 +277,10 @@ def test_build_viz_snapshot_online(mock_run: mock.MagicMock) -> None:
             return RunResult(stdout="10.0.0.2\n", stderr="", code=0, argv=[])
         if a == ["--direct", "--get-all-rules"]:
             return RunResult(
-                stdout='ipv4 filter INPUT 0 -j ACCEPT\nipv4 filter INPUT 10 -s 192.168.0.0/24 -j DROP\n',
+                stdout=(
+                    "ipv4 filter INPUT 0 -p tcp -m tcp --dport 22 -j ACCEPT\n"
+                    "ipv4 filter INPUT 10 -s 192.168.0.0/24 -j DROP\n"
+                ),
                 stderr="",
                 code=0,
                 argv=[],
@@ -217,6 +301,9 @@ def test_build_viz_snapshot_online(mock_run: mock.MagicMock) -> None:
     assert "entries_compact" in snap["ipsets"]["details"]["runtime"][0]
     assert snap["direct_rules_parsed"][0]["parse_error"] is False
     assert snap["direct_rules_parsed"][0]["chain"] == "INPUT"
+    assert len(snap["direct_allow_matrix"]["input"]) == 1
+    assert snap["direct_allow_matrix"]["input"][0]["dports"] == ["22"]
+    assert snap["direct_allow_matrix"]["stats"]["skipped_non_accept"] == 1
 
 
 @mock.patch("firewall_tool.viz.snapshot.run_firewall_cmd")

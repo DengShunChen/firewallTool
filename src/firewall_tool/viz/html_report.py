@@ -8,6 +8,7 @@ import re
 from collections import defaultdict
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from firewall_tool.viz.network_allow_extract import allow_matrix_from_snapshot_dict
 from firewall_tool.viz.snapshot import parse_direct_rule_line
 
 _MERMAID_ID_RE = re.compile(r"[^0-9a-zA-Z_]")
@@ -330,6 +331,113 @@ def _direct_table_html(parsed: Sequence[Mapping[str, Any]]) -> str:
     return f"<table>{thead}<tbody>{''.join(rows)}</tbody></table>{more}"
 
 
+def _mermaid_direct_allow_pie(matrix: Mapping[str, Any]) -> str:
+    rows_in = matrix.get("input") or []
+    rows_out = matrix.get("output") or []
+    rows_fw = matrix.get("forward") or []
+    rows_ot = matrix.get("other") or []
+    if not isinstance(rows_in, list):
+        rows_in = []
+    if not isinstance(rows_out, list):
+        rows_out = []
+    if not isinstance(rows_fw, list):
+        rows_fw = []
+    if not isinstance(rows_ot, list):
+        rows_ot = []
+    ni, no, nf, noo = len(rows_in), len(rows_out), len(rows_fw), len(rows_ot)
+    total = ni + no + nf + noo
+    if total == 0:
+        return 'flowchart TB\n  Z["（無 -j ACCEPT direct 列）"]'
+    slices: List[str] = ["pie showData", '    title Direct ACCEPT rows']
+    for label, n in (("INPUT", ni), ("OUTPUT", no), ("FORWARD", nf), ("other", noo)):
+        if n > 0:
+            slices.append(f'    "{label}" : {n}')
+    return "\n".join(slices)
+
+
+def _fmt_cell_list(xs: Any, *, max_items: int = 12) -> str:
+    if not isinstance(xs, list) or not xs:
+        return "—"
+    parts = [str(x) for x in xs[:max_items]]
+    tail = " …" if len(xs) > max_items else ""
+    return _esc(", ".join(parts)) + tail
+
+
+def _allow_chain_table(title: str, rows: Any) -> str:
+    if not isinstance(rows, list) or not rows:
+        return f"<h3>{_esc(title)}</h3><p class=\"muted\">—</p>"
+    body: List[str] = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        resolved = r.get("ipset_resolved") or []
+        if not isinstance(resolved, list):
+            resolved = []
+        iset_cells: List[str] = []
+        iset_sum: List[str] = []
+        for x in resolved:
+            if not isinstance(x, dict):
+                continue
+            nm = str(x.get("name") or "")
+            dr = str(x.get("direction") or "")
+            sm = str(x.get("entries_summary") or "")
+            iset_cells.append(f"{nm}({dr})" if dr else nm)
+            if sm:
+                iset_sum.append(f"{nm}: {sm}"[:140])
+        raw = str(r.get("raw") or "")
+        raw_short = raw if len(raw) <= 140 else raw[:137] + "…"
+        body.append(
+            "<tr>"
+            f"<td>{_esc(str(r.get('priority', '')))}</td>"
+            f"<td>{_esc(str(r.get('family', '')))}</td>"
+            f"<td>{_esc(str(r.get('table', '')))}</td>"
+            f"<td>{_fmt_cell_list(r.get('sources'))}</td>"
+            f"<td>{_fmt_cell_list(r.get('destinations'))}</td>"
+            f"<td>{_esc(str(r.get('proto') or '—'))}</td>"
+            f"<td>{_fmt_cell_list(r.get('dports'))}</td>"
+            f"<td>{_fmt_cell_list(r.get('sports'))}</td>"
+            f"<td>{_fmt_cell_list(r.get('in_interfaces'))}</td>"
+            f"<td>{_fmt_cell_list(r.get('out_interfaces'))}</td>"
+            f"<td>{_esc(', '.join(iset_cells) if iset_cells else '—')}</td>"
+            f"<td>{_esc(' | '.join(iset_sum) if iset_sum else '—')}</td>"
+            f"<td><code title=\"{_esc(raw)}\">{_esc(raw_short)}</code></td>"
+            "</tr>"
+        )
+    thead = (
+        "<thead><tr>"
+        "<th>prio</th><th>fam</th><th>table</th>"
+        "<th>來源 -s</th><th>目的 -d</th><th>-p</th>"
+        "<th>dport</th><th>sport</th><th>-i</th><th>-o</th>"
+        "<th>ipset</th><th>ipset 條目摘要</th><th>raw</th>"
+        "</tr></thead>"
+    )
+    return f"<h3>{_esc(title)}</h3><table>{thead}<tbody>{''.join(body)}</tbody></table>"
+
+
+def _direct_allow_matrix_html(matrix: Mapping[str, Any]) -> str:
+    parts: List[str] = []
+    note = matrix.get("note")
+    if isinstance(note, str) and note.strip():
+        parts.append(f"<p class=\"muted\">{_esc(note.strip())}</p>")
+    stats = matrix.get("stats")
+    if isinstance(stats, dict):
+        parts.append(
+            "<p class=\"muted\">"
+            f"解析統計：ACCEPT 列 {stats.get('accept_rows', 0)}；"
+            f"略過非 ACCEPT {stats.get('skipped_non_accept', 0)}；"
+            f"略過解析失敗 {stats.get('skipped_parse_error', 0)}。"
+            "</p>"
+        )
+    for title, key in (
+        ("INPUT（-j ACCEPT）", "input"),
+        ("OUTPUT（-j ACCEPT）", "output"),
+        ("FORWARD（-j ACCEPT）", "forward"),
+        ("其它 chain（-j ACCEPT）", "other"),
+    ):
+        parts.append(_allow_chain_table(title, matrix.get(key)))
+    return "".join(parts)
+
+
 def _direct_raw_block(snapshot: Mapping[str, Any]) -> str:
     rules = snapshot.get("direct_rules") or []
     if not isinstance(rules, list) or not rules:
@@ -356,6 +464,9 @@ def generate_html_report(snapshot: Mapping[str, Any]) -> str:
     parsed = _direct_parsed(snapshot)
     direct_mermaid = _esc(_mermaid_direct_chains(parsed))
     ipset_overlap = _esc(_mermaid_ipset_name_overlap(snapshot))
+    allow_matrix = allow_matrix_from_snapshot_dict(snapshot)
+    allow_pie = _esc(_mermaid_direct_allow_pie(allow_matrix))
+    allow_tables = _direct_allow_matrix_html(allow_matrix)
 
     return f"""<!DOCTYPE html>
 <html lang="zh-Hant">
@@ -390,6 +501,11 @@ def generate_html_report(snapshot: Mapping[str, Any]) -> str:
   <h3>名稱分布（Mermaid）</h3>
   <pre class="mermaid">{ipset_overlap}</pre>
   {_ipset_detail_tables(snapshot)}
+
+  <h2>Direct 允許流量摘要（INPUT／OUTPUT）</h2>
+  <p class="muted">由 <code>direct_rules_parsed</code>（僅 <code>-j ACCEPT</code>）與本快照 <code>ipsets.details</code> 對照而成；不含 zone／rich rules／nft 後端細節。</p>
+  <pre class="mermaid">{allow_pie}</pre>
+  {allow_tables}
 
   <h2>Direct 規則</h2>
   <p class="muted">圖示依 family／table／chain 分組，組內依 priority 串接（<strong>不代表</strong> netfilter 實際跳轉順序；除錯請對照原始行與 nft／iptables）。</p>

@@ -67,7 +67,7 @@ sudo /path/to/firewallTool/.venv/bin/fwctl status
 | direct 新增／刪除 | `direct add` / `direct remove`（見教學）；不熟可用 **`direct wizard-add`** / **`wizard-remove`** |
 | 重載 runtime | `fwctl reload --yes` |
 | 緊急 panic | `fwctl panic on` · `fwctl panic off` |
-| 視覺化快照／HTML | `fwctl viz export` · `fwctl viz html`（詳見 [docs/防火牆視覺化.md](docs/防火牆視覺化.md)） |
+| 視覺化快照／HTML／Markdown | `fwctl viz export` · `fwctl viz html` · `fwctl viz markdown`（詳見 [docs/防火牆視覺化.md](docs/防火牆視覺化.md)） |
 
 `--permanent`（**僅線上模式**）只影響「寫入永久設定檔」與 `list` 的資料來源；若要讓 runtime 與永久設定一致，變更後需執行 `fwctl reload`（或 `firewall-cmd --reload`）。
 

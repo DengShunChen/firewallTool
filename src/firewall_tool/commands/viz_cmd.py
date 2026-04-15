@@ -11,10 +11,11 @@ from rich.console import Console
 from firewall_tool.formatters import print_firewall_cmd_error
 from firewall_tool.runner import FirewallCmdError
 from firewall_tool.viz.html_report import generate_html_report, html_report_from_json_text
+from firewall_tool.viz.markdown_report import generate_markdown_report, markdown_report_from_json_text
 from firewall_tool.viz.snapshot import build_viz_snapshot, snapshot_to_json
 
 console = Console()
-viz_app = typer.Typer(help="匯出視覺化用 JSON 快照，或產生含 Mermaid 的 HTML 報告。")
+viz_app = typer.Typer(help="匯出視覺化用 JSON／Markdown／HTML（含 Mermaid）。")
 
 
 @viz_app.command("export")
@@ -42,7 +43,8 @@ def viz_export(
         output.write_text(text, encoding="utf-8")
         console.print(f"已寫入 [bold]{output}[/bold]")
     else:
-        console.print(text)
+        # 必須避免 Rich 把 JSON 內的 `[` 當成 markup，否則 stdout 非合法 JSON。
+        typer.echo(text)
 
 
 @viz_app.command("html")
@@ -75,4 +77,37 @@ def viz_html(
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(2) from e
     output.write_text(page, encoding="utf-8")
+    console.print(f"已寫入 [bold]{output}[/bold]")
+
+
+@viz_app.command("markdown")
+def viz_markdown(
+    input_path: Optional[Path] = typer.Option(
+        None,
+        "--input",
+        "-i",
+        help="使用既有 JSON（例如先前 `viz export`）；省略則即時查詢後產報告。",
+    ),
+    output: Path = typer.Option(
+        Path("fwctl-viz-report.md"),
+        "--output",
+        "-o",
+        help="Markdown 輸出路徑。",
+    ),
+) -> None:
+    """產生 Markdown（Mermaid 程式碼塊 + 表格；可貼 GitHub／GitLab）。"""
+    try:
+        if input_path is not None:
+            raw = input_path.read_text(encoding="utf-8")
+            body = markdown_report_from_json_text(raw)
+        else:
+            snap = build_viz_snapshot(include_raw=False)
+            body = generate_markdown_report(snap)
+    except FirewallCmdError as e:
+        print_firewall_cmd_error(console, e)
+        raise typer.Exit(e.code) from e
+    except (OSError, UnicodeError, ValueError) as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(2) from e
+    output.write_text(body, encoding="utf-8")
     console.print(f"已寫入 [bold]{output}[/bold]")

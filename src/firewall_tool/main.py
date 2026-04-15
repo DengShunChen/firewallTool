@@ -11,6 +11,7 @@ from firewall_tool.commands import (
     rule_cmd,
     service_port,
     status_cmd,
+    viz_cmd,
     zone_cmd,
 )
 from firewall_tool.runner import set_use_offline
@@ -55,6 +56,7 @@ def reload_cmd(
 
 
 app.add_typer(status_cmd.status_app, name="status")
+app.add_typer(viz_cmd.viz_app, name="viz")
 app.add_typer(zone_cmd.zone_app, name="zone")
 app.add_typer(service_port.service_app, name="service")
 app.add_typer(service_port.port_app, name="port")

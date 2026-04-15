@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>fwctl 防火牆快照</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1.5rem; line-height: 1.45; }
+    h1, h2 { line-height: 1.2; }
+    .muted { color: #666; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.9rem; }
+    th, td { border: 1px solid #ccc; padding: 0.35rem 0.5rem; vertical-align: top; }
+    th { background: #f4f4f4; }
+    pre { background: #f8f8f8; padding: 0.75rem; overflow: auto; max-height: 24rem; }
+    .mermaid { margin: 1rem 0; }
+  </style>
+</head>
+<body>
+  <h1>fwctl 防火牆快照</h1>
+  <p>產生時間：<code>2026-04-15T04:01:00Z</code> · 後端：<code>firewall-cmd</code> · schema：<code>2</code></p>
+
+  <h2>Zone／介面拓樸（Mermaid）</h2>
+  <p class="muted">有 runtime 時以 runtime 為準；否則使用 permanent。需可連至 CDN 載入 Mermaid。</p>
+  <pre class="mermaid">flowchart TB
+  DNODE[&quot;預設 zone: trusted&quot;]
+  Z_block[&quot;block&quot;]
+  DNODE --&gt; Z_block
+  Z_dmz[&quot;dmz&quot;]
+  DNODE --&gt; Z_dmz
+  Z_drop[&quot;drop&quot;]
+  DNODE --&gt; Z_drop
+  Z_external[&quot;external&quot;]
+  DNODE --&gt; Z_external
+  Z_home[&quot;home&quot;]
+  DNODE --&gt; Z_home
+  Z_internal[&quot;internal&quot;]
+  DNODE --&gt; Z_internal
+  Z_nm_shared[&quot;nm-shared&quot;]
+  DNODE --&gt; Z_nm_shared
+  Z_public[&quot;public&quot;]
+  DNODE --&gt; Z_public
+  Z_trusted[&quot;trusted (active) | bond0, eno1, ens1f0, ens1f1, ib0, ib1&quot;]
+  DNODE --&gt; Z_trusted
+  Z_work[&quot;work&quot;]
+  DNODE --&gt; Z_work</pre>
+
+  <h2>Runtime vs Permanent（services／ports drift）</h2>
+  <table><thead><tr><th>Zone</th><th>僅 runtime services</th><th>僅 permanent services</th><th>僅 runtime ports</th><th>僅 permanent ports</th><th>摘要</th></tr></thead><tbody><tr><td>block</td><td>—</td><td>—</td><td>—</td><td>—</td><td>一致</td></tr><tr><td>dmz</td><td>—</td><td>—</td><td>—</td><td>—</td><td>一致</td></tr><tr><td>drop</td><td>—</td><td>—</td><td>—</td><td>—</td><td>一致</td></tr><tr><td>external</td><td>—</td><td>—</td><td>—</td><td>—</td><td>一致</td></tr><tr><td>home</td><td>—</td><td>—</td><td>—</td><td>—</td><td>一致</td></tr><tr><td>internal</td><td>—</td><td>—</td><td>—</td><td>—</td><td>一致</td></tr><tr><td>nm-shared</td><td>—</td><td>—</td><td>—</td><td>—</td><td>一致</td></tr><tr><td>public</td><td>—</td><td>—</td><td>—</td><td>—</td><td>一致</td></tr><tr><td>trusted</td><td>—</td><td>—</td><td>—</td><td>—</td><td>一致</td></tr><tr><td>work</td><td>—</td><td>—</td><td>—</td><td>—</td><td>一致</td></tr></tbody></table>
+
+  <h2>ipset 名稱與條目</h2>
+  <p><strong>ipsets（runtime）</strong>：3D-Server, IBinside, INLNDTMV, OUTLNDTMV, RSHinside, SSHinside, httpws, ssh-in, ssh-out</p><p><strong>ipsets（permanent）</strong>：3D-Server, IBinside, INLNDTMV, OUTLNDTMV, RSHinside, SSHinside, httpws, ssh-in, ssh-out</p>
+  <h3>名稱分布（Mermaid）</h3>
+  <pre class="mermaid">flowchart LR
+  NRT[&quot;僅 runtime：0 個&quot;]
+  NB[&quot;兩側皆有：9 個&quot;]
+  NPM[&quot;僅 permanent：0 個&quot;]
+  NRT --- NB --- NPM</pre>
+  <h3>ipset 詳情（runtime）</h3><table><thead><tr><th>名稱</th><th>info 首行／錯誤</th><th>條目數</th><th>濃縮預覽（/24 方括號）</th><th>完整 info</th></tr></thead><tbody><tr><td>3D-Server</td><td>3D-Server</td><td>3</td><td>172.16.66.[4,5,11]（濃縮後 1 段；原始 3 筆）</td><td><details><summary>完整 <code>--info-ipset</code></summary><pre>3D-Server
+  type: hash:net
+  options: 
+  entries: 172.16.66.4 172.16.66.5 172.16.66.11</pre></details></td></tr><tr><td>IBinside</td><td>IBinside</td><td>204</td><td>192.168.58.[1-4,9-12,17-34,41-58,65-144], 192.168.59.[1-8,13-20,25-32,37-44,49-56,61-68,73-80,85-92,97-104,109-116]（濃縮後 2 段；原始 204 筆）</td><td><details><summary>完整 <code>--info-ipset</code></summary><pre>IBinside
+  type: hash:ip
+  options: 
+  entries: 192.168.58.1 192.168.58.2 192.168.58.3 192.168.58.4 192.168.58.9 192.168.58.10 192.168.58.11 192.168.58.12 192.168.58.17 192.168.58.18 192.168.58.19 192.168.58.20 192.168.58.21 192.168.58.22 192.168.58.23 192.168.58.24 192.168.58.25 192.168.58.26 192.168.58.27 192.168.58.28 192.168.58.29 192.168.58.30 192.168.58.31 192.168.58.32 192.168.58.33 192.168.58.34 192.168.58.41 192.168.58.42 192.168.58.43 192.168.58.44 192.168.58.45 192.168.58.46 192.168.58.47 192.168.58.48 192.168.58.49 192.168.58.50 192.168.58.51 192.168.58.52 192.168.58.53 192.168.58.54 192.168.58.55 192.168.58.56 192.168.58.57 192.168.58.58 192.168.58.65 192.168.58.66 192.168.58.67 192.168.58.68 192.168.58.69 192.168.58.70 192.168.58.71 192.168.58.72 192.168.58.73 192.168.58.74 192.168.58.75 192.168.58.76 192.168.58.77 192.168.58.78 192.168.58.79 192.168.58.80 192.168.58.81 192.168.58.82 192.168.58.83 192.168.58.84 192.168.58.85 192.168.58.86 192.168.58.87 192.168.58.88 192.168.58.89 192.168.58.90 192.168.58.91 192.168.58.92 192.168.58.93 192.168.58.94 192.168.58.95 192.168.58.96 192.168.58.97 192.168.58.98 192.168.58.99 192.168.58.100 192.168.58.101 192.168.58.102 192.168.58.103 192.168.58.104 192.168.58.105 192.168.58.106 192.168.58.107 192.168.58.108 192.168.58.109 192.168.58.110 192.168.58.111 192.168.58.112 192.168.58.113 192.168.58.114 192.168.58.115 192.168.58.116 192.168.58.117 192.168.58.118 192.168.58.119 192.168.58.120 192.168.58.121 192.168.58.122 192.168.58.123 192.168.58.124 192.168.58.125 192.168.58.126 192.168.58.127 192.168.58.128 192.168.58.129 192.168.58.130 192.168.58.131 192.168.58.132 192.168.58.133 192.168.58.134 192.168.58.135 192.168.58.136 192.168.58.137 192.168.58.138 192.168.58.139 192.168.58.140 192.168.58.141 192.168.58.142 192.168.58.143 192.168.58.144 192.168.59.1 192.168.59.2 192.168.59.3 192.168.59.4 192.168.59.5 192.168.59.6 192.168.59.7 192.168.59.8 192.168.59.13 192.168.59.14 192.168.59.15 192.168.59.16 192.168.59.17 192.168.59.18 192.168.59.19 192.168.59.20 192.168.59.25 192.168.59.26 192.168.59.27 192.168.59.28 192.168.59.29 192.168.59.30 192.168.59.31 192.168.59.32 192.168.59.37 192.168.59.38 192.168.59.39 192.168.59.40 192.168.59.41 192.168.59.42 192.168.59.43 192.168.59.44 192.168.59.49 192.168.59.50 192.168.59.51 192.168.59.52 192.168.59.53 192.168.59.54 192.168.59.55 192.168.59.56 192.168.59.61 192.168.59.62 192.168.59.63 192.168.59.64 192.168.59.65 192.168.59.66 192.168.59.67 192.168.59.68 192.168.59.73 192.168.59.74 192.168.59.75 192.168.59.76 192.168.59.77 192.168.59.78 192.168.59.79 192.168.59.80 192.168.59.85 192.168.59.86 192.168.59.87 192.168.59.88 192.168.59.89 192.168.59.90 192.168.59.91 192.168.59.92 192.168.59.97 192.168.59.98 192.168.59.99 192.168.59.100 192.168.59.101 192.168.59.102 192.168.59.103 192.168.59.104 192.168.59.109 192.168.59.110 192.168.59.111 192.168.59.112 192.168.59.113 192.168.59.114 192.168.59.115 192.168.59.116</pre></details></td></tr><tr><td>INLNDTMV</td><td>INLNDTMV</td><td>14</td><td>172.16.90.[101-107,151-157]（濃縮後 1 段；原始 14 筆）</td><td><details><summary>完整 <code>--info-ipset</code></summary><pre>INLNDTMV
+  type: hash:net
+  options: 
+  entries: 172.16.90.101 172.16.90.102 172.16.90.103 172.16.90.104 172.16.90.105 172.16.90.106 172.16.90.107 172.16.90.151 172.16.90.152 172.16.90.153 172.16.90.154 172.16.90.155 172.16.90.156 172.16.90.157</pre></details></td></tr><tr><td>OUTLNDTMV</td><td>OUTLNDTMV</td><td>7</td><td>10.6.90.[101-103,151-153], 172.16.70.71（濃縮後 2 段；原始 7 筆）</td><td><details><summary>完整 <code>--info-ipset</code></summary><pre>OUTLNDTMV
+  type: hash:net
+  options: 
+  entries: 10.6.90.101 10.6.90.102 10.6.90.103 10.6.90.151 10.6.90.152 10.6.90.153 172.16.70.71</pre></details></td></tr><tr><td>RSHinside</td><td>RSHinside</td><td>1</td><td>172.16.7.32（濃縮後 1 段；原始 1 筆）</td><td><details><summary>完整 <code>--info-ipset</code></summary><pre>RSHinside
+  type: hash:net
+  options: 
+  entries: 172.16.7.32</pre></details></td></tr><tr><td>SSHinside</td><td>SSHinside</td><td>8</td><td>61.56.15.233, 172.16.20.[21,22,41], 172.16.24.[1,3], 192.168.202.[28,29]（濃縮後 4 段；原始 8 筆）</td><td><details><summary>完整 <code>--info-ipset</code></summary><pre>SSHinside
+  type: hash:net
+  options: 
+  entries: 61.56.15.233 192.168.202.28 192.168.202.29 172.16.24.1 172.16.24.3 172.16.20.41 172.16.20.21 172.16.20.22</pre></details></td></tr><tr><td>httpws</td><td>httpws</td><td>6</td><td>61.56.13.[38,88], 172.16.9.25, 172.16.31.120, 172.16.70.[50,95]（濃縮後 4 段；原始 6 筆）</td><td><details><summary>完整 <code>--info-ipset</code></summary><pre>httpws
+  type: hash:net
+  options: 
+  entries: 172.16.9.25 61.56.13.38 61.56.13.88 172.16.70.50 172.16.70.95 172.16.31.120</pre></details></td></tr><tr><td>ssh-in</td><td>ssh-in</td><td>73</td><td>10.6.90.[101-103], 10.170.3.33, 10.170.4.34, 61.56.11.[49,51,77], 61.56.13.[38,47,52,54,86-88,168], 163.29.179.165, 172.16.6.[70,100-104], 172.16.7.192, 172.16.9.[7,8,14,18-20,25,26,35,59-62,129,130,132-136], 172.16.20.[41,46,110], 172.16.21.78, 172.16.24.[1-3] …（濃縮後 19 段；原始 73 筆）</td><td><details><summary>完整 <code>--info-ipset</code></summary><pre>ssh-in
+  type: hash:net
+  options: 
+  entries: 10.170.3.33 172.16.30.24 172.16.30.25 172.16.30.99 172.16.32.21 10.6.90.101 10.6.90.102 10.6.90.103 172.16.9.7 172.16.9.8 172.16.9.18 172.16.9.25 172.16.9.35 172.16.9.14 172.16.9.129 172.16.9.130 172.16.9.133 172.16.9.134 172.16.9.135 172.16.9.136 172.16.107.41 172.16.107.42 172.16.107.33 172.16.107.34 172.16.9.132 172.16.66.80 61.56.11.49 61.56.11.51 61.56.13.47 61.56.13.52 61.56.13.54 61.56.13.87 61.56.13.86 61.56.13.168 172.16.9.19 172.16.9.20 172.16.9.26 172.16.9.59 172.16.9.60 172.16.9.61 172.16.9.62 172.16.20.46 172.16.90.241 172.16.90.242 10.170.4.34 172.16.70.110 172.16.20.110 172.16.20.41 172.16.24.2 172.16.90.240 172.16.66.27 172.16.21.78 172.16.24.1 172.16.24.3 172.16.30.150 172.16.30.180 61.56.11.77 172.16.30.60 172.16.6.103 172.16.6.104 172.16.6.70 172.16.7.192 172.16.6.100 172.16.6.101 172.16.6.102 61.56.13.88 61.56.13.38 172.16.32.6 163.29.179.165 172.16.30.119 172.16.30.171 172.16.30.172 172.16.31.120</pre></details></td></tr><tr><td>ssh-out</td><td>ssh-out</td><td>54</td><td>10.6.90.[101-103], 61.56.11.[49,51,77], 61.56.13.[38,47,52,54,86-88,168], 163.29.179.165, 172.16.9.[7,8,14,18-20,25,26,35,59-62,129,130,132-136], 172.16.20.[41,46,47], 172.16.21.78, 172.16.24.[1-3], 172.16.30.[24,25,99,150,180], 172.16.31.120, 172.16.66.[27,80], 172.16.107.[33,34,41,42]（濃縮後 12 段；原始 54 筆）</td><td><details><summary>完整 <code>--info-ipset</code></summary><pre>ssh-out
+  type: hash:net
+  options: 
+  entries: 10.6.90.101 10.6.90.102 10.6.90.103 172.16.9.7 172.16.9.8 172.16.9.18 172.16.9.25 172.16.9.35 172.16.9.14 172.16.9.129 172.16.9.130 172.16.9.133 172.16.9.134 172.16.9.135 172.16.9.136 172.16.107.41 172.16.107.42 172.16.107.33 172.16.107.34 172.16.9.132 172.16.66.80 61.56.11.49 61.56.11.51 61.56.13.47 61.56.13.52 61.56.13.54 61.56.13.87 61.56.13.86 61.56.13.168 172.16.9.19 172.16.9.20 172.16.9.26 172.16.9.59 172.16.9.60 172.16.9.61 172.16.9.62 172.16.20.46 172.16.30.24 172.16.30.25 172.16.30.99 172.16.24.2 172.16.20.41 172.16.66.27 172.16.21.78 172.16.24.1 172.16.24.3 172.16.30.150 172.16.30.180 61.56.11.77 172.16.20.47 61.56.13.88 61.56.13.38 163.29.179.165 172.16.31.120</pre></details></td></tr></tbody></table><h3>ipset 詳情（permanent）</h3><table><thead><tr><th>名稱</th><th>info 首行／錯誤</th><th>條目數</th><th>濃縮預覽（/24 方括號）</th><th>完整 info</th></tr></thead><tbody><tr><td>3D-Server</td><td>3D-Server</td><td>3</td><td>172.16.66.[4,5,11]（濃縮後 1 段；原始 3 筆）</td><td><details><summary>完整 <code>--info-ipset</code></summary><pre>3D-Server
+  type: hash:net
+  options: 
+  entries: 172.16.66.4 172.16.66.5 172.16.66.11</pre></details></td></tr><tr><td>IBinside</td><td>IBinside</td><td>204</td><td>192.168.58.[1-4,9-12,17-34,41-58,65-144], 192.168.59.[1-8,13-20,25-32,37-44,49-56,61-68,73-80,85-92,97-104,109-116]（濃縮後 2 段；原始 204 筆）</td><td><details><summary>完整 <code>--info-ipset</code></summary><pre>IBinside
+  type: hash:ip
+  options: 
+  entries: 192.168.58.1 192.168.58.2 192.168.58.3 192.168.58.4 192.168.58.9 192.168.58.10 192.168.58.11 192.168.58.12 192.168.58.17 192.168.58.18 192.168.58.19 192.168.58.20 192.168.58.21 192.168.58.22 192.168.58.23 192.168.58.24 192.168.58.25 192.168.58.26 192.168.58.27 192.168.58.28 192.168.58.29 192.168.58.30 192.168.58.31 192.168.58.32 192.168.58.33 192.168.58.34 192.168.58.41 192.168.58.42 192.168.58.43 192.168.58.44 192.168.58.45 192.168.58.46 192.168.58.47 192.168.58.48 192.168.58.49 192.168.58.50 192.168.58.51 192.168.58.52 192.168.58.53 192.168.58.54 192.168.58.55 192.168.58.56 192.168.58.57 192.168.58.58 192.168.58.65 192.168.58.66 192.168.58.67 192.168.58.68 192.168.58.69 192.168.58.70 192.168.58.71 192.168.58.72 192.168.58.73 192.168.58.74 192.168.58.75 192.168.58.76 192.168.58.77 192.168.58.78 192.168.58.79 192.168.58.80 192.168.58.81 192.168.58.82 192.168.58.83 192.168.58.84 192.168.58.85 192.168.58.86 192.168.58.87 192.168.58.88 192.168.58.89 192.168.58.90 192.168.58.91 192.168.58.92 192.168.58.93 192.168.58.94 192.168.58.95 192.168.58.96 192.168.58.97 192.168.58.98 192.168.58.99 192.168.58.100 192.168.58.101 192.168.58.102 192.168.58.103 192.168.58.104 192.168.58.105 192.168.58.106 192.168.58.107 192.168.58.108 192.168.58.109 192.168.58.110 192.168.58.111 192.168.58.112 192.168.58.113 192.168.58.114 192.168.58.115 192.168.58.116 192.168.58.117 192.168.58.118 192.168.58.119 192.168.58.120 192.168.58.121 192.168.58.122 192.168.58.123 192.168.58.124 192.168.58.125 192.168.58.126 192.168.58.127 192.168.58.128 192.168.58.129 192.168.58.130 192.168.58.131 192.168.58.132 192.168.58.133 192.168.58.134 192.168.58.135 192.168.58.136 192.168.58.137 192.168.58.138 192.168.58.139 192.168.58.140 192.168.58.141 192.168.58.142 192.168.58.143 192.168.58.144 192.168.59.1 192.168.59.2 192.168.59.3 192.168.59.4 192.168.59.5 192.168.59.6 192.168.59.7 192.168.59.8 192.168.59.13 192.168.59.14 192.168.59.15 192.168.59.16 192.168.59.17 192.168.59.18 192.168.59.19 192.168.59.20 192.168.59.25 192.168.59.26 192.168.59.27 192.168.59.28 192.168.59.29 192.168.59.30 192.168.59.31 192.168.59.32 192.168.59.37 192.168.59.38 192.168.59.39 192.168.59.40 192.168.59.41 192.168.59.42 192.168.59.43 192.168.59.44 192.168.59.49 192.168.59.50 192.168.59.51 192.168.59.52 192.168.59.53 192.168.59.54 192.168.59.55 192.168.59.56 192.168.59.61 192.168.59.62 192.168.59.63 192.168.59.64 192.168.59.65 192.168.59.66 192.168.59.67 192.168.59.68 192.168.59.73 192.168.59.74 192.168.59.75 192.168.59.76 192.168.59.77 192.168.59.78 192.168.59.79 192.168.59.80 192.168.59.85 192.168.59.86 192.168.59.87 192.168.59.88 192.168.59.89 192.168.59.90 192.168.59.91 192.168.59.92 192.168.59.97 192.168.59.98 192.168.59.99 192.168.59.100 192.168.59.101 192.168.59.102 192.168.59.103 192.168.59.104 192.168.59.109 192.168.59.110 192.168.59.111 192.168.59.112 192.168.59.113 192.168.59.114 192.168.59.115 192.168.59.116</pre></details></td></tr><tr><td>INLNDTMV</td><td>INLNDTMV</td><td>14</td><td>172.16.90.[101-107,151-157]（濃縮後 1 段；原始 14 筆）</td><td><details><summary>完整 <code>--info-ipset</code></summary><pre>INLNDTMV
+  type: hash:net
+  options: 
+  entries: 172.16.90.101 172.16.90.102 172.16.90.103 172.16.90.104 172.16.90.105 172.16.90.106 172.16.90.107 172.16.90.151 172.16.90.152 172.16.90.153 172.16.90.154 172.16.90.155 172.16.90.156 172.16.90.157</pre></details></td></tr><tr><td>OUTLNDTMV</td><td>OUTLNDTMV</td><td>7</td><td>10.6.90.[101-103,151-153], 172.16.70.71（濃縮後 2 段；原始 7 筆）</td><td><details><summary>完整 <code>--info-ipset</code></summary><pre>OUTLNDTMV
+  type: hash:net
+  options: 
+  entries: 10.6.90.101 10.6.90.102 10.6.90.103 10.6.90.151 10.6.90.152 10.6.90.153 172.16.70.71</pre></details></td></tr><tr><td>RSHinside</td><td>RSHinside</td><td>1</td><td>172.16.7.32（濃縮後 1 段；原始 1 筆）</td><td><details><summary>完整 <code>--info-ipset</code></summary><pre>RSHinside
+  type: hash:net
+  options: 
+  entries: 172.16.7.32</pre></details></td></tr><tr><td>SSHinside</td><td>SSHinside</td><td>8</td><td>61.56.15.233, 172.16.20.[21,22,41], 172.16.24.[1,3], 192.168.202.[28,29]（濃縮後 4 段；原始 8 筆）</td><td><details><summary>完整 <code>--info-ipset</code></summary><pre>SSHinside
+  type: hash:net
+  options: 
+  entries: 61.56.15.233 192.168.202.28 192.168.202.29 172.16.24.1 172.16.24.3 172.16.20.41 172.16.20.21 172.16.20.22</pre></details></td></tr><tr><td>httpws</td><td>httpws</td><td>6</td><td>61.56.13.[38,88], 172.16.9.25, 172.16.31.120, 172.16.70.[50,95]（濃縮後 4 段；原始 6 筆）</td><td><details><summary>完整 <code>--info-ipset</code></summary><pre>httpws
+  type: hash:net
+  options: 
+  entries: 172.16.9.25 61.56.13.38 61.56.13.88 172.16.70.50 172.16.70.95 172.16.31.120</pre></details></td></tr><tr><td>ssh-in</td><td>ssh-in</td><td>73</td><td>10.6.90.[101-103], 10.170.3.33, 10.170.4.34, 61.56.11.[49,51,77], 61.56.13.[38,47,52,54,86-88,168], 163.29.179.165, 172.16.6.[70,100-104], 172.16.7.192, 172.16.9.[7,8,14,18-20,25,26,35,59-62,129,130,132-136], 172.16.20.[41,46,110], 172.16.21.78, 172.16.24.[1-3] …（濃縮後 19 段；原始 73 筆）</td><td><details><summary>完整 <code>--info-ipset</code></summary><pre>ssh-in
+  type: hash:net
+  options: 
+  entries: 10.170.3.33 172.16.30.24 172.16.30.25 172.16.30.99 172.16.32.21 10.6.90.101 10.6.90.102 10.6.90.103 172.16.9.7 172.16.9.8 172.16.9.18 172.16.9.25 172.16.9.35 172.16.9.14 172.16.9.129 172.16.9.130 172.16.9.133 172.16.9.134 172.16.9.135 172.16.9.136 172.16.107.41 172.16.107.42 172.16.107.33 172.16.107.34 172.16.9.132 172.16.66.80 61.56.11.49 61.56.11.51 61.56.13.47 61.56.13.52 61.56.13.54 61.56.13.87 61.56.13.86 61.56.13.168 172.16.9.19 172.16.9.20 172.16.9.26 172.16.9.59 172.16.9.60 172.16.9.61 172.16.9.62 172.16.20.46 172.16.90.241 172.16.90.242 10.170.4.34 172.16.70.110 172.16.20.110 172.16.20.41 172.16.24.2 172.16.90.240 172.16.66.27 172.16.21.78 172.16.24.1 172.16.24.3 172.16.30.150 172.16.30.180 61.56.11.77 172.16.30.60 172.16.6.103 172.16.6.104 172.16.6.70 172.16.7.192 172.16.6.100 172.16.6.101 172.16.6.102 61.56.13.88 61.56.13.38 172.16.32.6 163.29.179.165 172.16.30.119 172.16.30.171 172.16.30.172 172.16.31.120</pre></details></td></tr><tr><td>ssh-out</td><td>ssh-out</td><td>54</td><td>10.6.90.[101-103], 61.56.11.[49,51,77], 61.56.13.[38,47,52,54,86-88,168], 163.29.179.165, 172.16.9.[7,8,14,18-20,25,26,35,59-62,129,130,132-136], 172.16.20.[41,46,47], 172.16.21.78, 172.16.24.[1-3], 172.16.30.[24,25,99,150,180], 172.16.31.120, 172.16.66.[27,80], 172.16.107.[33,34,41,42]（濃縮後 12 段；原始 54 筆）</td><td><details><summary>完整 <code>--info-ipset</code></summary><pre>ssh-out
+  type: hash:net
+  options: 
+  entries: 10.6.90.101 10.6.90.102 10.6.90.103 172.16.9.7 172.16.9.8 172.16.9.18 172.16.9.25 172.16.9.35 172.16.9.14 172.16.9.129 172.16.9.130 172.16.9.133 172.16.9.134 172.16.9.135 172.16.9.136 172.16.107.41 172.16.107.42 172.16.107.33 172.16.107.34 172.16.9.132 172.16.66.80 61.56.11.49 61.56.11.51 61.56.13.47 61.56.13.52 61.56.13.54 61.56.13.87 61.56.13.86 61.56.13.168 172.16.9.19 172.16.9.20 172.16.9.26 172.16.9.59 172.16.9.60 172.16.9.61 172.16.9.62 172.16.20.46 172.16.30.24 172.16.30.25 172.16.30.99 172.16.24.2 172.16.20.41 172.16.66.27 172.16.21.78 172.16.24.1 172.16.24.3 172.16.30.150 172.16.30.180 61.56.11.77 172.16.20.47 61.56.13.88 61.56.13.38 163.29.179.165 172.16.31.120</pre></details></td></tr></tbody></table>
+
+  <h2>Direct 規則</h2>
+  <p class="muted">圖示依 family／table／chain 分組，組內依 priority 串接（<strong>不代表</strong> netfilter 實際跳轉順序；除錯請對照原始行與 nft／iptables）。</p>
+  <h3>Direct 流程概覽（Mermaid）</h3>
+  <pre class="mermaid">flowchart TB
+  subgraph Z_dir_ipv4_filter_INPUT[&quot;ipv4 / filter / INPUT（共 22 條）&quot;]
+    direction TB
+    DR0[&quot;-5: -p icmp --icmp-type timestamp-request -j DROP&quot;]
+    DR1[&quot;100: -i lo -j ACCEPT&quot;]
+    DR0 --&gt; DR1
+    DR2[&quot;110: -p tcp -m state --state ESTABLISHED -j ACCEPT&quot;]
+    DR1 --&gt; DR2
+    DR3[&quot;190: -p tcp -m multiport --dports 113,512 -j ACCEPT&quot;]
+    DR2 --&gt; DR3
+    DR4[&quot;210: -s 192.168.50.0/23 -j ACCEPT&quot;]
+    DR3 --&gt; DR4
+    DR5[&quot;220: -m set --match-set IBinside src -j ACCEPT&quot;]
+    DR4 --&gt; DR5
+    DR6[&quot;230: -s 10.96.0.0/16 -j ACCEPT&quot;]
+    DR5 --&gt; DR6
+    DR7[&quot;240: -s 10.97.0.0/16 -j ACCEPT&quot;]
+    DR6 --&gt; DR7
+    DR8[&quot;250: -s 10.112.0.0/16 -j ACCEPT&quot;]
+    DR7 --&gt; DR8
+    DR9[&quot;260: -s 10.113.0.0/16 -j ACCEPT&quot;]
+    DR8 --&gt; DR9
+    DR10[&quot;270: -p udp -s 172.16.65.1 --sport 53 -j ACCEPT&quot;]
+    DR9 --&gt; DR10
+    DR11[&quot;280: -p udp -s 172.16.20.80 --dport 161 -j ACCEPT&quot;]
+    DR10 --&gt; DR11
+    DR12[&quot;301: -p tcp -s 10.6.1.200 -m multiport --sports 17005,17007,18002 -j ACCEPT&quot;]
+    DR11 --&gt; DR12
+    DR13[&quot;301: -p tcp -s 172.16.20.21 -m multiport --dports 20,21 -j ACCEPT&quot;]
+    DR12 --&gt; DR13
+    DR14[&quot;302: -p tcp -s 172.16.20.22 -m multiport --dports 20,21 -j ACCEPT&quot;]
+    DR13 --&gt; DR14
+    DR15[&quot;512: -p tcp -m set --match-set INLNDTMV src -j ACCEPT&quot;]
+    DR14 --&gt; DR15
+    DR16[&quot;512: -p tcp -m set --match-set OUTLNDTMV src -j ACCEPT&quot;]
+    DR15 --&gt; DR16
+    DR17[&quot;512: -p tcp -m set --match-set ssh-in src --dport 22 -j ACCEPT&quot;]
+    DR16 --&gt; DR17
+    DR18[&quot;605: -p tcp -m set --match-set httpws src -m multiport --dport 80,443 -j ACCEPT&quot;]
+    DR17 --&gt; DR18
+    DR19[&quot;997: -p icmp -j ACCEPT&quot;]
+    DR18 --&gt; DR19
+    DR20[&quot;998: -m limit --limit 2/second --limit-burst 10 -j LOG --log-prefix INPUT:&quot;]
+    DR19 --&gt; DR20
+    DR21[&quot;999: -j DROP&quot;]
+    DR20 --&gt; DR21
+  end
+  subgraph Z_dir_ipv4_filter_OUTPUT[&quot;ipv4 / filter / OUTPUT（共 22 條）&quot;]
+    direction TB
+    DR22[&quot;-5: -p icmp --icmp-type timestamp-reply -j DROP&quot;]
+    DR23[&quot;100: -o lo -j ACCEPT&quot;]
+    DR22 --&gt; DR23
+    DR24[&quot;110: -p tcp -m state --state ESTABLISHED -j ACCEPT&quot;]
+    DR23 --&gt; DR24
+    DR25[&quot;190: -p tcp -m multiport --dports 113,512 -j ACCEPT&quot;]
+    DR24 --&gt; DR25
+    DR26[&quot;200: -p udp -d 172.16.65.1 --dport 53 -j ACCEPT&quot;]
+    DR25 --&gt; DR26
+    DR27[&quot;210: -d 192.168.50.0/23 -j ACCEPT&quot;]
+    DR26 --&gt; DR27
+    DR28[&quot;220: -m set --match-set IBinside dst -j ACCEPT&quot;]
+    DR27 --&gt; DR28
+    DR29[&quot;221: -p tcp -m set --match-set 3D-Server src -m tcp -m multiport --dports 21,22 -j ACCEPT&quot;]
+    DR28 --&gt; DR29
+    DR30[&quot;230: -d 10.96.0.0/16 -j ACCEPT&quot;]
+    DR29 --&gt; DR30
+    DR31[&quot;240: -d 10.97.0.0/16 -j ACCEPT&quot;]
+    DR30 --&gt; DR31
+    DR32[&quot;250: -d 10.112.0.0/16 -j ACCEPT&quot;]
+    DR31 --&gt; DR32
+    DR33[&quot;260: -d 10.113.0.0/16 -j ACCEPT&quot;]
+    DR32 --&gt; DR33
+    DR34[&quot;280: -p udp -d 172.16.20.80 --sport 161 -j ACCEPT&quot;]
+    DR33 --&gt; DR34
+    DR35[&quot;301: -p tcp -d 10.6.1.200 -m multiport --dports 9218,15003,15008,17001,17003,17005,17007,18002 -j ACCEPT&quot;]
+    DR34 --&gt; DR35
+    DR36[&quot;306: -p udp -d 172.16.20.26 --dport 514 -j ACCEPT&quot;]
+    DR35 --&gt; DR36
+    DR37[&quot;512: -p tcp -m set --match-set INLNDTMV dst -j ACCEPT&quot;]
+    DR36 --&gt; DR37
+    DR38[&quot;512: -p tcp -m set --match-set OUTLNDTMV dst -j ACCEPT&quot;]
+    DR37 --&gt; DR38
+    DR39[&quot;512: -p tcp -m set --match-set ssh-out dst --dport 22 -j ACCEPT&quot;]
+    DR38 --&gt; DR39
+    DR40[&quot;605: -p tcp -m set --match-set httpws dst -m multiport --dport 80,443 -j ACCEPT&quot;]
+    DR39 --&gt; DR40
+    DR41[&quot;997: -p icmp -j ACCEPT&quot;]
+    DR40 --&gt; DR41
+    DR42[&quot;998: -m limit --limit 2/second --limit-burst 10 -j LOG --log-prefix OUTPUT:&quot;]
+    DR41 --&gt; DR42
+    DR43[&quot;999: -j DROP&quot;]
+    DR42 --&gt; DR43
+  end</pre>
+  <h3>Direct 結構化表格</h3>
+  <table><thead><tr><th>prio</th><th>family</th><th>table</th><th>chain</th><th>rule</th></tr></thead><tbody><tr><td>-5</td><td>ipv4</td><td>filter</td><td>OUTPUT</td><td>-p icmp --icmp-type timestamp-reply -j DROP</td></tr><tr><td>100</td><td>ipv4</td><td>filter</td><td>OUTPUT</td><td>-o lo -j ACCEPT</td></tr><tr><td>110</td><td>ipv4</td><td>filter</td><td>OUTPUT</td><td>-p tcp -m state --state ESTABLISHED -j ACCEPT</td></tr><tr><td>190</td><td>ipv4</td><td>filter</td><td>OUTPUT</td><td>-p tcp -m multiport --dports 113,512 -j ACCEPT</td></tr><tr><td>200</td><td>ipv4</td><td>filter</td><td>OUTPUT</td><td>-p udp -d 172.16.65.1 --dport 53 -j ACCEPT</td></tr><tr><td>210</td><td>ipv4</td><td>filter</td><td>OUTPUT</td><td>-d 192.168.50.0/23 -j ACCEPT</td></tr><tr><td>220</td><td>ipv4</td><td>filter</td><td>OUTPUT</td><td>-m set --match-set IBinside dst -j ACCEPT</td></tr><tr><td>221</td><td>ipv4</td><td>filter</td><td>OUTPUT</td><td>-p tcp -m set --match-set 3D-Server src -m tcp -m multiport --dports 21,22 -j ACCEPT</td></tr><tr><td>230</td><td>ipv4</td><td>filter</td><td>OUTPUT</td><td>-d 10.96.0.0/16 -j ACCEPT</td></tr><tr><td>240</td><td>ipv4</td><td>filter</td><td>OUTPUT</td><td>-d 10.97.0.0/16 -j ACCEPT</td></tr><tr><td>250</td><td>ipv4</td><td>filter</td><td>OUTPUT</td><td>-d 10.112.0.0/16 -j ACCEPT</td></tr><tr><td>260</td><td>ipv4</td><td>filter</td><td>OUTPUT</td><td>-d 10.113.0.0/16 -j ACCEPT</td></tr><tr><td>280</td><td>ipv4</td><td>filter</td><td>OUTPUT</td><td>-p udp -d 172.16.20.80 --sport 161 -j ACCEPT</td></tr><tr><td>301</td><td>ipv4</td><td>filter</td><td>OUTPUT</td><td>-p tcp -d 10.6.1.200 -m multiport --dports 9218,15003,15008,17001,17003,17005,17007,18002 -j ACCEPT</td></tr><tr><td>306</td><td>ipv4</td><td>filter</td><td>OUTPUT</td><td>-p udp -d 172.16.20.26 --dport 514 -j ACCEPT</td></tr><tr><td>512</td><td>ipv4</td><td>filter</td><td>OUTPUT</td><td>-p tcp -m set --match-set INLNDTMV dst -j ACCEPT</td></tr><tr><td>512</td><td>ipv4</td><td>filter</td><td>OUTPUT</td><td>-p tcp -m set --match-set OUTLNDTMV dst -j ACCEPT</td></tr><tr><td>512</td><td>ipv4</td><td>filter</td><td>OUTPUT</td><td>-p tcp -m set --match-set ssh-out dst --dport 22 -j ACCEPT</td></tr><tr><td>605</td><td>ipv4</td><td>filter</td><td>OUTPUT</td><td>-p tcp -m set --match-set httpws dst -m multiport --dport 80,443 -j ACCEPT</td></tr><tr><td>997</td><td>ipv4</td><td>filter</td><td>OUTPUT</td><td>-p icmp -j ACCEPT</td></tr><tr><td>998</td><td>ipv4</td><td>filter</td><td>OUTPUT</td><td>-m limit --limit 2/second --limit-burst 10 -j LOG --log-prefix OUTPUT: </td></tr><tr><td>999</td><td>ipv4</td><td>filter</td><td>OUTPUT</td><td>-j DROP</td></tr><tr><td>-5</td><td>ipv4</td><td>filter</td><td>INPUT</td><td>-p icmp --icmp-type timestamp-request -j DROP</td></tr><tr><td>100</td><td>ipv4</td><td>filter</td><td>INPUT</td><td>-i lo -j ACCEPT</td></tr><tr><td>110</td><td>ipv4</td><td>filter</td><td>INPUT</td><td>-p tcp -m state --state ESTABLISHED -j ACCEPT</td></tr><tr><td>190</td><td>ipv4</td><td>filter</td><td>INPUT</td><td>-p tcp -m multiport --dports 113,512 -j ACCEPT</td></tr><tr><td>210</td><td>ipv4</td><td>filter</td><td>INPUT</td><td>-s 192.168.50.0/23 -j ACCEPT</td></tr><tr><td>220</td><td>ipv4</td><td>filter</td><td>INPUT</td><td>-m set --match-set IBinside src -j ACCEPT</td></tr><tr><td>230</td><td>ipv4</td><td>filter</td><td>INPUT</td><td>-s 10.96.0.0/16 -j ACCEPT</td></tr><tr><td>240</td><td>ipv4</td><td>filter</td><td>INPUT</td><td>-s 10.97.0.0/16 -j ACCEPT</td></tr><tr><td>250</td><td>ipv4</td><td>filter</td><td>INPUT</td><td>-s 10.112.0.0/16 -j ACCEPT</td></tr><tr><td>260</td><td>ipv4</td><td>filter</td><td>INPUT</td><td>-s 10.113.0.0/16 -j ACCEPT</td></tr><tr><td>270</td><td>ipv4</td><td>filter</td><td>INPUT</td><td>-p udp -s 172.16.65.1 --sport 53 -j ACCEPT</td></tr><tr><td>280</td><td>ipv4</td><td>filter</td><td>INPUT</td><td>-p udp -s 172.16.20.80 --dport 161 -j ACCEPT</td></tr><tr><td>301</td><td>ipv4</td><td>filter</td><td>INPUT</td><td>-p tcp -s 10.6.1.200 -m multiport --sports 17005,17007,18002 -j ACCEPT</td></tr><tr><td>301</td><td>ipv4</td><td>filter</td><td>INPUT</td><td>-p tcp -s 172.16.20.21 -m multiport --dports 20,21 -j ACCEPT</td></tr><tr><td>302</td><td>ipv4</td><td>filter</td><td>INPUT</td><td>-p tcp -s 172.16.20.22 -m multiport --dports 20,21 -j ACCEPT</td></tr><tr><td>512</td><td>ipv4</td><td>filter</td><td>INPUT</td><td>-p tcp -m set --match-set INLNDTMV src -j ACCEPT</td></tr><tr><td>512</td><td>ipv4</td><td>filter</td><td>INPUT</td><td>-p tcp -m set --match-set OUTLNDTMV src -j ACCEPT</td></tr><tr><td>512</td><td>ipv4</td><td>filter</td><td>INPUT</td><td>-p tcp -m set --match-set ssh-in src --dport 22 -j ACCEPT</td></tr><tr><td>605</td><td>ipv4</td><td>filter</td><td>INPUT</td><td>-p tcp -m set --match-set httpws src -m multiport --dport 80,443 -j ACCEPT</td></tr><tr><td>997</td><td>ipv4</td><td>filter</td><td>INPUT</td><td>-p icmp -j ACCEPT</td></tr><tr><td>998</td><td>ipv4</td><td>filter</td><td>INPUT</td><td>-m limit --limit 2/second --limit-burst 10 -j LOG --log-prefix INPUT: </td></tr><tr><td>999</td><td>ipv4</td><td>filter</td><td>INPUT</td><td>-j DROP</td></tr></tbody></table>
+  <details><summary>原始 <code>--get-all-rules</code> 行</summary><pre>ipv4 filter OUTPUT -5 -p icmp --icmp-type timestamp-reply -j DROP
+ipv4 filter OUTPUT 100 -o lo -j ACCEPT
+ipv4 filter OUTPUT 110 -p tcp -m state --state ESTABLISHED -j ACCEPT
+ipv4 filter OUTPUT 190 -p tcp -m multiport --dports 113,512 -j ACCEPT
+ipv4 filter OUTPUT 200 -p udp -d 172.16.65.1 --dport 53 -j ACCEPT
+ipv4 filter OUTPUT 210 -d 192.168.50.0/23 -j ACCEPT
+ipv4 filter OUTPUT 220 -m set --match-set IBinside dst -j ACCEPT
+ipv4 filter OUTPUT 221 -p tcp -m set --match-set 3D-Server src -m tcp -m multiport --dports 21,22 -j ACCEPT
+ipv4 filter OUTPUT 230 -d 10.96.0.0/16 -j ACCEPT
+ipv4 filter OUTPUT 240 -d 10.97.0.0/16 -j ACCEPT
+ipv4 filter OUTPUT 250 -d 10.112.0.0/16 -j ACCEPT
+ipv4 filter OUTPUT 260 -d 10.113.0.0/16 -j ACCEPT
+ipv4 filter OUTPUT 280 -p udp -d 172.16.20.80 --sport 161 -j ACCEPT
+ipv4 filter OUTPUT 301 -p tcp -d 10.6.1.200 -m multiport --dports 9218,15003,15008,17001,17003,17005,17007,18002 -j ACCEPT
+ipv4 filter OUTPUT 306 -p udp -d 172.16.20.26 --dport 514 -j ACCEPT
+ipv4 filter OUTPUT 512 -p tcp -m set --match-set INLNDTMV dst -j ACCEPT
+ipv4 filter OUTPUT 512 -p tcp -m set --match-set OUTLNDTMV dst -j ACCEPT
+ipv4 filter OUTPUT 512 -p tcp -m set --match-set ssh-out dst --dport 22 -j ACCEPT
+ipv4 filter OUTPUT 605 -p tcp -m set --match-set httpws dst -m multiport --dport 80,443 -j ACCEPT
+ipv4 filter OUTPUT 997 -p icmp -j ACCEPT
+ipv4 filter OUTPUT 998 -m limit --limit 2/second --limit-burst 10 -j LOG --log-prefix &#x27;OUTPUT: &#x27;
+ipv4 filter OUTPUT 999 -j DROP
+ipv4 filter INPUT -5 -p icmp --icmp-type timestamp-request -j DROP
+ipv4 filter INPUT 100 -i lo -j ACCEPT
+ipv4 filter INPUT 110 -p tcp -m state --state ESTABLISHED -j ACCEPT
+ipv4 filter INPUT 190 -p tcp -m multiport --dports 113,512 -j ACCEPT
+ipv4 filter INPUT 210 -s 192.168.50.0/23 -j ACCEPT
+ipv4 filter INPUT 220 -m set --match-set IBinside src -j ACCEPT
+ipv4 filter INPUT 230 -s 10.96.0.0/16 -j ACCEPT
+ipv4 filter INPUT 240 -s 10.97.0.0/16 -j ACCEPT
+ipv4 filter INPUT 250 -s 10.112.0.0/16 -j ACCEPT
+ipv4 filter INPUT 260 -s 10.113.0.0/16 -j ACCEPT
+ipv4 filter INPUT 270 -p udp -s 172.16.65.1 --sport 53 -j ACCEPT
+ipv4 filter INPUT 280 -p udp -s 172.16.20.80 --dport 161 -j ACCEPT
+ipv4 filter INPUT 301 -p tcp -s 10.6.1.200 -m multiport --sports 17005,17007,18002 -j ACCEPT
+ipv4 filter INPUT 301 -p tcp -s 172.16.20.21 -m multiport --dports 20,21 -j ACCEPT
+ipv4 filter INPUT 302 -p tcp -s 172.16.20.22 -m multiport --dports 20,21 -j ACCEPT
+ipv4 filter INPUT 512 -p tcp -m set --match-set INLNDTMV src -j ACCEPT
+ipv4 filter INPUT 512 -p tcp -m set --match-set OUTLNDTMV src -j ACCEPT
+ipv4 filter INPUT 512 -p tcp -m set --match-set ssh-in src --dport 22 -j ACCEPT
+ipv4 filter INPUT 605 -p tcp -m set --match-set httpws src -m multiport --dport 80,443 -j ACCEPT
+ipv4 filter INPUT 997 -p icmp -j ACCEPT
+ipv4 filter INPUT 998 -m limit --limit 2/second --limit-burst 10 -j LOG --log-prefix &#x27;INPUT: &#x27;
+ipv4 filter INPUT 999 -j DROP</pre></details>
+
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({ startOnLoad: false, securityLevel: "strict", flowchart: { htmlLabels: false } });
+    const nodes = document.querySelectorAll(".mermaid");
+    if (nodes.length) await mermaid.run({ nodes: [...nodes] });
+  </script>
+</body>
+</html>

@@ -14,6 +14,12 @@ from firewall_tool.viz.html_report import (
     _mermaid_topology,
 )
 from firewall_tool.viz.network_allow_extract import allow_matrix_from_snapshot_dict
+from firewall_tool.viz.status_summary import (
+    ensure_status_summary,
+    mermaid_drift_zone_pie,
+    mermaid_direct_jump_pie,
+    status_summary_markdown_block,
+)
 
 
 def _md_cell(s: Any) -> str:
@@ -296,6 +302,7 @@ def generate_markdown_report(snapshot: Mapping[str, Any]) -> str:
     ver = snapshot.get("schema_version", "")
     parsed = _direct_parsed(snapshot)
     matrix = allow_matrix_from_snapshot_dict(snapshot)
+    st = ensure_status_summary(snapshot)
 
     parts: List[str] = [
         f"# {title}\n",
@@ -305,6 +312,11 @@ def generate_markdown_report(snapshot: Mapping[str, Any]) -> str:
         "",
         "> Mermaid 圖在 GitHub／GitLab／部分編輯器可預覽；純文字檢視可略過程式碼塊。",
         "",
+        status_summary_markdown_block(st),
+        "### Zone drift（services／ports 一致 vs 有差異）\n",
+        _mermaid_block(mermaid_drift_zone_pie(snapshot)),
+        "### Direct `-j` 目標分布（列數）\n",
+        _mermaid_block(mermaid_direct_jump_pie(snapshot)),
         "## Zone／介面拓樸（Mermaid）\n",
         _mermaid_block(_mermaid_topology(snapshot)),
         "## Runtime vs Permanent（services／ports drift）\n",

@@ -17,7 +17,21 @@
 </head>
 <body>
   <h1>fwctl 防火牆快照</h1>
-  <p>產生時間：<code>2026-04-15T04:44:18Z</code> · 後端：<code>firewall-cmd</code> · schema：<code>2</code></p>
+  <p>產生時間：<code>2026-04-15T06:45:25Z</code> · 後端：<code>firewall-cmd</code> · schema：<code>2</code></p>
+
+  <h2>快照狀態與圖表分析</h2>
+  <p class="muted">數字為本快照彙總；圖表需 Mermaid。狀態等級僅依 drift／解析／ipset 名稱差異等<strong>粗淺規則</strong>，不代表資安稽核結論。</p>
+  <table><thead><tr><th>項目</th><th>值</th></tr></thead><tbody><tr><td>drift 可比對</td><td>是</td></tr><tr><td>runtime zone 數</td><td>10</td></tr><tr><td>permanent zone 數</td><td>10</td></tr><tr><td>主要視角 zone 數</td><td>10</td></tr><tr><td>rich rules 筆數（主要視角）</td><td>1</td></tr><tr><td>drift：一致 zone</td><td>10</td></tr><tr><td>drift：有差異 zone</td><td>0</td></tr><tr><td>ipset 名稱（runtime／permanent／交集）</td><td>9/9/9</td></tr><tr><td>僅 runtime／僅 permanent 的 ipset 名稱數</td><td>0 / 0</td></tr><tr><td>direct 規則行數</td><td>44</td></tr><tr><td>direct 解析成功／失敗</td><td>44 / 0</td></tr><tr><td>direct ACCEPT 摘要列／略過非 ACCEPT</td><td>38 / 6</td></tr><tr><td>狀態等級</td><td>ok</td></tr></tbody></table><p><strong>建議</strong></p><ul><li>未偵測到上述警示條件（仍不代表整體安全性）。</li></ul>
+  <h3>Zone drift（services／ports 一致 vs 有差異）</h3>
+  <pre class="mermaid">pie showData
+    title Zone drift（services／ports）
+    &quot;一致&quot; : 10</pre>
+  <h3>Direct <code>-j</code> 目標分布（列數）</h3>
+  <pre class="mermaid">pie showData
+    title Direct -j 目標（列數）
+    &quot;ACCEPT&quot; : 38
+    &quot;DROP&quot; : 4
+    &quot;LOG&quot; : 2</pre>
 
   <h2>Zone／介面拓樸（Mermaid）</h2>
   <p class="muted">有 runtime 時以 runtime 為準；否則使用 permanent。需可連至 CDN 載入 Mermaid。</p>

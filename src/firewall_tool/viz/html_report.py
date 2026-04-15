@@ -9,6 +9,12 @@ from collections import defaultdict
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from firewall_tool.viz.network_allow_extract import allow_matrix_from_snapshot_dict
+from firewall_tool.viz.status_summary import (
+    ensure_status_summary,
+    mermaid_drift_zone_pie,
+    mermaid_direct_jump_pie,
+    status_summary_html_table,
+)
 from firewall_tool.viz.snapshot import parse_direct_rule_line
 
 _MERMAID_ID_RE = re.compile(r"[^0-9a-zA-Z_]")
@@ -467,6 +473,10 @@ def generate_html_report(snapshot: Mapping[str, Any]) -> str:
     allow_matrix = allow_matrix_from_snapshot_dict(snapshot)
     allow_pie = _esc(_mermaid_direct_allow_pie(allow_matrix))
     allow_tables = _direct_allow_matrix_html(allow_matrix)
+    st = ensure_status_summary(snapshot)
+    status_tbl = status_summary_html_table(st)
+    drift_status_pie = _esc(mermaid_drift_zone_pie(snapshot))
+    jump_pie = _esc(mermaid_direct_jump_pie(snapshot))
 
     return f"""<!DOCTYPE html>
 <html lang="zh-Hant">
@@ -488,6 +498,14 @@ def generate_html_report(snapshot: Mapping[str, Any]) -> str:
 <body>
   <h1>{_esc(title)}</h1>
   <p>產生時間：<code>{gen}</code> · 後端：<code>{backend}</code> · schema：<code>{_esc(str(ver))}</code></p>
+
+  <h2>快照狀態與圖表分析</h2>
+  <p class="muted">數字為本快照彙總；圖表需 Mermaid。狀態等級僅依 drift／解析／ipset 名稱差異等<strong>粗淺規則</strong>，不代表資安稽核結論。</p>
+  {status_tbl}
+  <h3>Zone drift（services／ports 一致 vs 有差異）</h3>
+  <pre class="mermaid">{drift_status_pie}</pre>
+  <h3>Direct <code>-j</code> 目標分布（列數）</h3>
+  <pre class="mermaid">{jump_pie}</pre>
 
   <h2>Zone／介面拓樸（Mermaid）</h2>
   <p class="muted">有 runtime 時以 runtime 為準；否則使用 permanent。需可連至 CDN 載入 Mermaid。</p>

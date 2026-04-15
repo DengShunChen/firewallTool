@@ -12,6 +12,7 @@ from firewall_tool.main import app
 from firewall_tool.runner import RunResult, set_use_offline
 from firewall_tool.viz.html_report import generate_html_report
 from firewall_tool.viz.markdown_report import generate_markdown_report
+from firewall_tool.viz.status_summary import compute_status_summary, mermaid_direct_jump_pie
 from firewall_tool.viz.ip_compact import build_ipset_compact_fields, collapse_ip_tokens
 from firewall_tool.viz.network_allow_extract import (
     build_direct_allow_matrix,
@@ -169,6 +170,44 @@ public (active)
     assert z["lists"]["ports"]["only_permanent"] == ["443/tcp"]
 
 
+def test_mermaid_direct_jump_pie() -> None:
+    snap = {
+        "direct_rules_parsed": [
+            {
+                "parse_error": False,
+                "tokens": ["-j", "ACCEPT"],
+            },
+            {
+                "parse_error": False,
+                "tokens": ["-j", "DROP"],
+            },
+        ]
+    }
+    s = mermaid_direct_jump_pie(snap)
+    assert "ACCEPT" in s and "DROP" in s
+
+
+def test_compute_status_summary_keys() -> None:
+    snap = {
+        "drift_available": False,
+        "runtime": None,
+        "permanent": {"zones": []},
+        "ipsets": {"runtime": [], "permanent": []},
+        "direct_rules": [],
+        "direct_rules_parsed": [],
+        "direct_allow_matrix": {
+            "stats": {"accept_rows": 0, "skipped_non_accept": 0, "skipped_parse_error": 0},
+            "input": [],
+            "output": [],
+            "forward": [],
+            "other": [],
+        },
+    }
+    st = compute_status_summary(snap)
+    assert "status_level" in st
+    assert "zones_primary_count" in st
+
+
 def test_generate_markdown_report_offline_snapshot() -> None:
     snap = {
         "schema_version": 2,
@@ -194,6 +233,7 @@ def test_generate_markdown_report_offline_snapshot() -> None:
     }
     md = generate_markdown_report(snap)
     assert "防火牆快照" in md
+    assert "快照狀態" in md
     assert "```mermaid" in md
     assert "offline" in md
 
@@ -228,6 +268,7 @@ def test_generate_html_offline_drift_message() -> None:
     assert "預設 zone: public" in html
     assert "名稱分布（Mermaid）" in html
     assert "Direct 允許流量摘要" in html
+    assert "快照狀態" in html
 
 
 def test_snapshot_to_json_roundtrip_keys() -> None:
@@ -304,6 +345,8 @@ def test_build_viz_snapshot_online(mock_run: mock.MagicMock) -> None:
     assert len(snap["direct_allow_matrix"]["input"]) == 1
     assert snap["direct_allow_matrix"]["input"][0]["dports"] == ["22"]
     assert snap["direct_allow_matrix"]["stats"]["skipped_non_accept"] == 1
+    assert "status_summary" in snap
+    assert snap["status_summary"]["direct_accept_rows"] == 1
 
 
 @mock.patch("firewall_tool.viz.snapshot.run_firewall_cmd")

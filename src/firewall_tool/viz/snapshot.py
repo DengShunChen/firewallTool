@@ -18,6 +18,7 @@ from firewall_tool.runner import (
 )
 from firewall_tool.viz.ip_compact import build_ipset_compact_fields
 from firewall_tool.viz.network_allow_extract import build_direct_allow_matrix
+from firewall_tool.viz.status_summary import compute_status_summary
 
 SCHEMA_VERSION = 2
 
@@ -399,6 +400,7 @@ def build_viz_snapshot(*, include_raw: bool = False) -> Dict[str, Any]:
 
     snap["direct_rules_parsed"] = [parse_direct_rule_line(str(ln)) for ln in snap["direct_rules"]]
     snap["direct_allow_matrix"] = build_direct_allow_matrix(snap)
+    snap["status_summary"] = compute_status_summary(snap)
 
     return snap
 
